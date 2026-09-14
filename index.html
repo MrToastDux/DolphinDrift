@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f5f6ef" />
+  <meta name="description" content="Meet the mellowest dolphin in Neo Kingston. An endless island runner with neon rails, golden records, and good vibrations." />
+  <title>Dolphin Drift — A little island escape</title>
+  <link rel="icon" type="image/svg+xml" href="/public-icon.svg" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Dolphin Drift home"><svg viewBox="0 0 42 42" fill="none" aria-hidden="true"><path d="M4 26C8 12 21 9 28 18l9 1 2 5-13 1c-3 8-10 10-16 5l-6 7 1-11Z" fill="currentColor"/><path d="m16 14 3-9 7 9" fill="currentColor"/><circle cx="29" cy="21" r="1.4" fill="#f5f6ef"/></svg><span>dolphin<span class="brand-light">drift</span></span></a>
+      <div class="location"><span class="status-dot"></span> NEO KINGSTON <span class="location-year">/ 2086</span></div>
+      <div class="top-actions">
+        <button class="sound-button" id="sound" aria-label="Turn on island radio" aria-pressed="false"><span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="sound-label">Sound off</span></button>
+        <button class="icon-button" id="pause" aria-label="Pause game" disabled><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></button>
+      </div>
+    </header>
+
+    <main class="game-shell" id="game-shell" data-state="ready">
+      <canvas id="world" tabindex="0" aria-label="A Jamaican dolphin facing forward and walking along a futuristic seaside boardwalk. Use left and right arrows to switch lanes, up or Space to jump, and down or S to roll under gates. Collect magnets, shields, and double-record powerups."></canvas>
+      <div class="scene-grain" aria-hidden="true"></div>
+
+      <div class="scene-label"><span class="scene-label-dot"></span><span>THE PALM LINE</span><span class="scene-label-divider"></span><span>27° & EASY</span></div>
+      <div class="hud" aria-label="Run statistics">
+        <div class="stat distance-stat"><span class="stat-label">DISTANCE</span><span class="stat-value"><span id="distance">0</span><small>m</small></span></div>
+        <div class="stat"><span class="stat-label">RECORDS</span><span class="stat-value"><span class="record-icon" aria-hidden="true"></span><span id="coins">0</span></span></div>
+        <div class="stat best-stat"><span class="stat-label">BEST RUN</span><span class="stat-value"><span id="best">0</span><small>m</small></span></div>
+      </div>
+
+      <section class="intro" id="intro" aria-labelledby="intro-title">
+        <div class="eyebrow"><span></span> A LITTLE ISLAND ESCAPE</div>
+        <h1 id="intro-title">Less rush.<br>More <em>drift.</em></h1>
+        <p>A dolphin. A fresh pair of kicks.<br>One sweet reggae rhythm. Endless good vibrations.</p>
+        <button class="start-button" id="start">Let’s drift <span aria-hidden="true">↗</span></button>
+        <span class="start-hint">or press <kbd>SPACE</kbd> to find your flow</span>
+        <div class="intro-bottom"><span class="jamaica-flag" aria-label="Jamaican flag"></span><span>ISLAND SOUL. FUTURE FEET.</span></div>
+      </section>
+
+      <div class="character-label" id="character-label"><span class="label-line"></span><span>MEET DUB<span class="character-subtitle">Locally grown. Ocean roaming.</span></span></div>
+
+      <div class="run-message" id="run-message" role="status" aria-live="polite"></div>
+      <div class="flow-meter" id="flow-meter" aria-label="Record streak bonus"><span class="flow-note" aria-hidden="true">♫</span><div><span id="flow-title">FIND YOUR RHYTHM</span><div class="flow-bars" id="flow-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><strong id="flow-count">0/8</strong></div>
+      <div class="powerups hidden" id="powerups" role="group" aria-label="Active powerups">
+        <div class="power-badge power-magnet hidden" id="power-magnet" title="Magnet attracts nearby records">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v7a6 6 0 0 0 12 0V4h-4v7a2 2 0 0 1-4 0V4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 7h4m4 0h4" stroke="currentColor" stroke-width="1.8"/></svg><span class="power-name">Magnet</span><strong>10s</strong>
+        </div>
+        <div class="power-badge power-shield hidden" id="power-shield" title="Shield saves one hit before the timer expires">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 3v5c0 4-6 8-6 8s-6-4-6-8V5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 10 2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="power-name">Shield</span><strong>12s</strong>
+        </div>
+        <div class="power-badge power-double hidden" id="power-double" title="Each record counts twice">
+          <span class="power-glyph" aria-hidden="true">2×</span><span class="power-name">Records</span><strong>10s</strong>
+        </div>
+      </div>
+      <div class="world-caption"><span class="orbit-icon" aria-hidden="true">✳</span><span>LOW PRESSURE.<br>HIGH TIDES.</span></div>
+      <div class="radio-card" id="radio-card"><span class="vinyl" aria-hidden="true"><i></i></span><div><span class="radio-eyebrow">NEO KINGSTON SOUND SYSTEM</span><strong>Sunset skank <span id="radio-status">/ 78 BPM</span></strong></div><span class="radio-led" aria-hidden="true"></span></div>
+
+      <div class="overlay hidden" id="overlay">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <span class="modal-eyebrow" id="modal-eyebrow">TAKE A BREATHER</span>
+          <h2 id="modal-title">On island time.</h2>
+          <p id="modal-description">Your next good wave can wait.</p>
+          <div class="results hidden" id="results"><div><strong id="result-distance">0</strong><span>METERS DRIFTED</span></div><div><strong id="result-coins">0</strong><span>RECORDS COLLECTED</span></div></div>
+          <button class="start-button" id="resume">Keep drifting <span aria-hidden="true">↗</span></button>
+          <button class="text-button" id="home">Back to the island</button>
+        </section>
+      </div>
+
+      <div class="touch-controls" aria-label="Touch controls">
+        <button data-action="left" aria-label="Move left">←</button><button data-action="right" aria-label="Move right">→</button><span></span><button data-action="slide" aria-label="Roll">↓</button><button data-action="jump" aria-label="Jump">↑</button>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <span class="footer-tagline">An endless runner. An unhurried state of mind.</span>
+      <div class="controls"><span><kbd>←</kbd><kbd>→</kbd> switch lanes</span><span><kbd>↑</kbd> jump</span><span><kbd>↓</kbd> roll</span><span class="pause-control"><kbd>ESC</kbd> pause</span></div>
+      <span class="footer-signoff">Made of sunshine <span aria-hidden="true">☀</span></span>
+    </footer>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

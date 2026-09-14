@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dolphin Drift — Render gallery</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: #f5f6ef; color: #214e48; font: 14px/1.5 system-ui, sans-serif; }
+    header { max-width: 1440px; margin: 0 auto 20px; }
+    h1 { margin: 0 0 4px; font-size: 24px; font-weight: 650; }
+    header p { margin: 0; color: #647c71; }
+    #status { display: block; margin-top: 10px; font-weight: 600; }
+    #status.error { color: #a03f30; white-space: pre-wrap; }
+    .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 1440px; margin: auto; }
+    figure { min-width: 0; margin: 0; overflow: hidden; border: 1px solid #d4dfd2; border-radius: 14px; background: #fffdf4; }
+    figcaption { padding: 11px 16px; font-weight: 650; }
+    figcaption small { display: block; font-weight: 400; font-size: 11px; color: #647c71; }
+    canvas { display: block; width: 100%; height: 350px; }
+    @media (max-width: 720px) { body { padding: 14px; } .gallery { grid-template-columns: 1fr; gap: 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dolphin Drift · Render gallery</h1>
+    <p>Fixed gameplay poses · camera 1 · dt 0 · time 1 · no simulation updates or audio</p>
+    <output id="status" role="status">Preparing six snapshots…</output>
+  </header>
+  <main class="gallery">
+    <figure><figcaption>01 · Forward walk<small>Neutral powerups; normal walking gait</small></figcaption><canvas aria-label="Dolphin walking forward"></canvas></figure>
+    <figure><figcaption>02 · Roll: 22%<small>Entering the forward tumble</small></figcaption><canvas aria-label="Dolphin at 22 percent through a roll"></canvas></figure>
+    <figure><figcaption>03 · Roll: 50%<small>Halfway through the rotation</small></figcaption><canvas aria-label="Dolphin halfway through a roll"></canvas></figure>
+    <figure><figcaption>04 · Roll: 78%<small>Coming out of the tumble</small></figcaption><canvas aria-label="Dolphin at 78 percent through a roll"></canvas></figure>
+    <figure><figcaption>05 · All powerups active<small>Magnet 8s · shield 10s · double records 8s</small></figcaption><canvas aria-label="Dolphin with magnet, shield, and double records active"></canvas></figure>
+    <figure><figcaption>06 · Powerups on the track<small>Coral magnet · aqua shield · golden double records</small></figcaption><canvas aria-label="Three collectible powerups across the track lanes"></canvas></figure>
+  </main>
+  <script type="module">
+    const status = document.getElementById('status');
+    const showError = error => {
+      status.classList.add('error');
+      status.textContent = `Render error: ${error?.stack || error?.message || error}`;
+    };
+    try {
+      const [{ Game }, { Renderer }] = await Promise.all([
+        import('../src/game.js'),
+        import('../src/renderer.js'),
+      ]);
+      const poses = [null, .22, .5, .78, null, null];
+      const samples = [...document.querySelectorAll('canvas')].map((canvas, index) => {
+        const game = new Game({ random: () => .5 });
+        game.state = 'playing';
+        game.distance = 45;
+        game.objects = [];
+        game.powerups = { magnet: 0, shield: 0 };
+        game.dubRemaining = 0;
+        game.shieldGrace = 0;
+        Object.assign(game.player, {
+          lane: 0, x: 0, jump: 0,
+          sliding: poses[index] !== null,
+          rollProgress: poses[index] ?? 0,
+          slideRemaining: poses[index] === null ? 0 : .85 * (1 - poses[index]),
+        });
+        if (index === 4) {
+          game.powerups = { magnet: 8, shield: 10 };
+          game.dubRemaining = 8;
+        }
+        if (index === 5) {
+          game.objects = [
+            { id: 1001, type: 'powerup', power: 'magnet', lane: -1, z: 3.5 },
+            { id: 1002, type: 'powerup', power: 'shield', lane: 0, z: 7 },
+            { id: 1003, type: 'powerup', power: 'double', lane: 1, z: 5.2 },
+          ];
+        }
+        const renderer = new Renderer(canvas);
+        renderer.camera = 1;
+        renderer.reducedMotion = false;
+        return { game, renderer };
+      });
+      const renderAll = () => {
+        try {
+          for (const { game, renderer } of samples) {
+            renderer.resize();
+            renderer.camera = 1;
+            renderer.draw(game, 0, 1);
+          }
+          status.classList.remove('error');
+          status.textContent = '✓ All 6 snapshots rendered successfully.';
+        } catch (error) { showError(error); }
+      };
+      renderAll();
+      window.addEventListener('resize', renderAll);
+    } catch (error) { showError(error); }
+  </script>
+</body>
+</html>

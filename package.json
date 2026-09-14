@@ -1,0 +1,14 @@
+{
+  "name": "dolphin-drift",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A little island escape. A futuristic dolphin endless runner.",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/main.js && node --check src/renderer.js && node --check src/dolphin.js && node --check src/game.js && node --check src/audio.js"
+  },
+  "engines": { "node": ">=20" }
+}
