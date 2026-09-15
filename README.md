@@ -14,11 +14,20 @@ Open [http://localhost:5173](http://localhost:5173). In VS Code, open this folde
 
 ## Play
 
-Move between three lanes, jump over coral barriers, crates, and buoys, roll under green gates, dodge trams and market carts, and collect golden records. Dub faces the track and tucks into a forward roll when you press down. More ground obstacles appear as your run develops, and every obstacle row leaves a clear route. Your best distance is saved locally in the current browser.
+Move between three lanes, jump over coral barriers, crates, and buoys, roll under green gates, dodge trams and market carts, and collect golden records. Dub faces the track and tucks into a forward roll when you press down. Ground obstacle counts are 33% higher on average, with more rows blocking two lanes. Every row still leaves a clear route, and row spacing and pickup frequency stay the same. Your best distance is saved locally in the current browser.
 
 Spend **200 records from your current run** using the **surfboard button** or **B** for a **20-second flight** above the track. Dub lies on his back on the board, smoking and trailing wisps into the sky. Steer left and right through the golden sky records while flying over ground obstacles. Jump and roll resume when you land, with a brief grace period to spot the next hazard. A flight cannot be bought again until the current ride ends; records and flight time reset on a new run.
 
-Pick up **Magnet** to attract nearby records for 10 seconds or **Shield** to survive one hit within 12 seconds. Active badges show time remaining. Sky records are only reachable on the surfboard, including with a magnet; ground records and powerups are collected on foot. Every record is worth one; the double-record pickup and streak bonus have been removed.
+Powerups rotate through four types, with a pickup every **four obstacle rows** (25% fewer regular pickups than before):
+
+| Powerup | Effect | Duration |
+| --- | --- | --- |
+| Magnet | Attracts nearby records | 10 seconds |
+| Shield | Absorbs one hit | 12 seconds |
+| Ghost | Passes through ground obstacles, with a brief grace period when it ends | 6 seconds |
+| Super jump | Higher jumps; timed jumps can clear green hurdles, carts, and trams | 12 seconds |
+
+Small progress bars on the left show active powerup time and surfboard savings or flight time. The surfboard control shows only its name, price, and progress. Gameplay has no popup messages or decorative cards. Sky records are only reachable on the surfboard, including with a magnet; ground records and powerups are collected on foot. Every record is worth one.
 
 Speed increases with active playing time, from **12 m/s** by **0.12 m/s each second**, up to **30 m/s**. Pausing freezes speed progression and all gameplay timers.
 
@@ -30,7 +39,7 @@ Speed increases with active playing time, from **12 m/s** by **0.12 m/s each sec
 | Buy a surfboard flight | B | Surfboard button (200 records) |
 | Pause / resume | Escape or P | Pause button |
 
-Touch controls are also available on screen. Press **Space** or select **Let's drift** to begin. Your first start also turns on island radio unless you muted it beforehand; use the sound button in the header to mute or unmute. Switching away from the game pauses the run.
+Use swipes and taps directly on the track on touchscreens. Press **Space** or select **Let's drift** to begin. Your first start also turns on island radio unless you muted it beforehand; use the sound button in the header to mute or unmute. Switching away from the game pauses the run.
 
 ## Check
 
@@ -41,7 +50,7 @@ npm run check
 
 The gameplay tests cover movement, obstacle clearance, record collection, surfboard purchases and flight, sky routes, powerups, progressive speed, adjacent obstacle collisions, pause/restart, safe route generation, and frame timing. The check command validates JavaScript syntax. Open `/test/render-gallery.html` for fixed visual snapshots, including flight and a portrait canvas.
 
-Open `/test/ui-smoke.html` to run the real interface through 11 browser checks for purchase eligibility, button and keyboard handling, countdowns, pause/resume, expiry, and reset. It uses isolated test balances and leaves a flight preview below the report; reload the normal game to play a regular run.
+Open `/test/ui-smoke.html` to run the real interface through 16 browser checks for purchase eligibility, button and keyboard handling, four powerup bars, mobile layouts, countdowns, pause/resume, expiry, and reset. It uses isolated test balances and leaves a flight preview below the report; reload the normal game to play a regular run.
 
 ## Files
 

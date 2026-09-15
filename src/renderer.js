@@ -83,8 +83,9 @@ export class Renderer {
     if (!['coin', 'powerup', 'shield-break', 'surfboard', 'surfboard-end'].includes(type) || this.reducedMotion) return;
     const altitude = game.player.altitude || 0;
     const p = this.project(game.player.x * 1.82, altitude + (altitude ? .6 : 1.2) + game.player.jump, 0);
-    const count = type === 'coin' ? 9 : 24;
-    const color = type === 'shield-break' || event.power === 'shield' ? '#b9ffea' : event.power === 'magnet' ? '#ffc093' : '#ffdf86';
+    const count = type === 'coin' ? 9 : ['ghost', 'spring'].includes(event.power) ? 12 : 24;
+    const powerColors = { shield: '#b9ffea', magnet: '#ffc093', ghost: '#ded3f5', spring: '#b2def5' };
+    const color = type === 'shield-break' ? powerColors.shield : powerColors[event.power] || '#ffdf86';
     for (let i = 0; i < count; i++) {
       const angle = i / count * TAU;
       this.particles.push({ x: p.x, y: p.y, vx: Math.cos(angle) * (40 + Math.random() * 80), vy: Math.sin(angle) * 90 - 35, life: .65, max: .65, color });
@@ -379,7 +380,10 @@ export class Renderer {
     if (type === 'powerup') {
       const p = this.project(x, 1.05 + Math.sin(this.time * 2 + object.id) * .1, z);
       const radius = .43 * p.scale;
-      const colors = { magnet: ['#f5a07c', '#815841'], shield: ['#a2e4d1', '#376e65'] };
+      const colors = {
+        magnet: ['#f5a07c', '#815841'], shield: ['#a2e4d1', '#376e65'],
+        ghost: ['#d5c9ed', '#74618f'], spring: ['#a7d8ee', '#3f718c'],
+      };
       if (!colors[object.power]) return;
       const [bright, ink] = colors[object.power];
       this.ellipse(floor.x, floor.y, radius * .9, radius * .19, '#547e6240');
@@ -401,6 +405,17 @@ export class Renderer {
         c.beginPath(); c.moveTo(0, -radius * .58); c.lineTo(radius * .48, -radius * .35); c.lineTo(radius * .39, radius * .19); c.quadraticCurveTo(radius * .24, radius * .47, 0, radius * .6); c.quadraticCurveTo(-radius * .24, radius * .47, -radius * .39, radius * .19); c.lineTo(-radius * .48, -radius * .35); c.closePath();
         c.fillStyle = ink; c.fill();
         this.line([{ x: 0, y: -radius * .25 }, { x: 0, y: radius * .30 }], bright, radius * .1);
+      } else if (object.power === 'ghost') {
+        c.beginPath(); c.moveTo(-radius * .49, radius * .53); c.lineTo(-radius * .49, -radius * .12);
+        c.bezierCurveTo(-radius * .49, -radius * .75, radius * .49, -radius * .75, radius * .49, -radius * .12);
+        c.lineTo(radius * .49, radius * .53); c.lineTo(radius * .25, radius * .36); c.lineTo(0, radius * .55); c.lineTo(-radius * .25, radius * .36); c.closePath();
+        c.fillStyle = '#f9f6ffb3'; c.fill(); c.strokeStyle = ink; c.lineWidth = radius * .07; c.stroke();
+        for (const side of [-1, 1]) this.ellipse(side * radius * .18, -radius * .04, radius * .065, radius * .10, ink);
+      } else if (object.power === 'spring') {
+        this.line([{ x: -radius * .33, y: -radius * .20 }, { x: 0, y: -radius * .58 }, { x: radius * .33, y: -radius * .20 }], ink, radius * .13);
+        this.line([{ x: 0, y: -radius * .52 }, { x: 0, y: -radius * .04 }], ink, radius * .12);
+        this.line([{ x: -radius * .39, y: radius * .06 }, { x: radius * .35, y: radius * .06 }, { x: -radius * .32, y: radius * .28 }, { x: radius * .35, y: radius * .47 }, { x: -radius * .39, y: radius * .47 }], ink, radius * .10);
+        this.line([{ x: -radius * .47, y: radius * .66 }, { x: radius * .47, y: radius * .66 }], '#f1faff', radius * .10);
       }
       if (p.scale > 24) {
         c.font = `600 ${Math.max(6, radius * .28)}px "DM Sans", sans-serif`; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = ink;

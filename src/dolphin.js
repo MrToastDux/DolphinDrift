@@ -100,7 +100,9 @@ export class DolphinRig {
 
   build(game, time, surfing = game.surfRemaining > 0) {
     this.faces.length = 0;
+    this.boostOrigins = [];
     const p = game.player;
+    const spring = (game.powerups?.spring ?? 0) > 0 || Boolean(p.springJump);
     const rolling = p.sliding && !surfing;
     const progress = rolling ? (p.rollProgress ?? (1 - p.slideRemaining / .85)) : 0;
     const tuck = rolling ? smooth(Math.min(progress / .16, (1 - progress) / .16)) : 0;
@@ -125,9 +127,10 @@ export class DolphinRig {
       const shoe = [ankle[0], ankle[1] - 5, ankle[2] + 7];
       this.ellipsoid([ankle[0], ankle[1] + 4, ankle[2]], [8, 9, 8], palette.cream);
       this.band([ankle[0], ankle[1] + 7, ankle[2]], [8.2, 8.2], 3, palette.gold);
-      this.ellipsoid(shoe, [13, 9, 21], palette.cream, tuck * -.7);
-      this.ellipsoid([shoe[0], shoe[1] - 5, shoe[2]], [13.5, 3.7, 21.5], palette.sole, tuck * -.7);
+      this.ellipsoid(shoe, [13, 9, 21], spring ? [185, 218, 230] : palette.cream, tuck * -.7);
+      this.ellipsoid([shoe[0], shoe[1] - 5, shoe[2]], [13.5, 3.7, 21.5], spring ? [100, 167, 193] : palette.sole, tuck * -.7);
       this.ellipsoid([shoe[0], shoe[1] + 1, shoe[2] - 16], [8, 4, 3], palette.green, tuck * -.7);
+      if (spring && !surfing) this.boostOrigins.push(this.transform([shoe[0], shoe[1] - 9, shoe[2]]));
     }
 
     // The tail curls up behind him during a roll, instead of stretching flat.
@@ -204,6 +207,42 @@ export class DolphinRig {
     Object.assign(this, pose);
   }
 
+  drawMesh(renderer, ghost) {
+    const c = renderer.ctx;
+    if (!ghost) {
+      for (const face of this.faces) {
+        // Matching hairline strokes close subpixel seams between mesh faces.
+        renderer.poly(face.points, face.fill, face.fill, .35);
+      }
+      return;
+    }
+    // Composite once so overlapping triangles retain an even, see-through opacity.
+    if (!this.ghostLayer) this.ghostLayer = renderer.canvas.ownerDocument.createElement('canvas');
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const face of this.faces) for (const point of face.points) {
+      left = Math.min(left, point.x); top = Math.min(top, point.y);
+      right = Math.max(right, point.x); bottom = Math.max(bottom, point.y);
+    }
+    left = Math.floor(left - 4); top = Math.floor(top - 4);
+    const width = Math.ceil(right - left + 4), height = Math.ceil(bottom - top + 4);
+    const resolution = Math.max(1, Math.min(2.5, c.getTransform().a));
+    const layer = this.ghostLayer;
+    const pixelWidth = Math.ceil(width * resolution), pixelHeight = Math.ceil(height * resolution);
+    if (layer.width !== pixelWidth || layer.height !== pixelHeight) { layer.width = pixelWidth; layer.height = pixelHeight; }
+    const lc = layer.getContext('2d');
+    lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, layer.width, layer.height);
+    lc.setTransform(resolution, 0, 0, resolution, -left * resolution, -top * resolution);
+    for (const face of this.faces) {
+      lc.beginPath();
+      face.points.forEach((point, i) => i ? lc.lineTo(point.x, point.y) : lc.moveTo(point.x, point.y));
+      lc.closePath(); lc.fillStyle = face.fill; lc.fill(); lc.strokeStyle = face.fill; lc.lineWidth = .35; lc.stroke();
+    }
+    lc.globalCompositeOperation = 'source-atop'; lc.fillStyle = '#e1d3f42b'; lc.fillRect(left, top, width, height); lc.globalCompositeOperation = 'source-over';
+    c.save(); c.globalAlpha = .56; c.shadowColor = '#e9dcff'; c.shadowBlur = 5;
+    c.drawImage(layer, left, top, width, height);
+    c.restore();
+  }
+
   draw(renderer, game) {
     const c = renderer.ctx, p = game.player;
     const ground = renderer.project(p.x * 1.82, 0, 0);
@@ -249,10 +288,18 @@ export class DolphinRig {
     c.translate(ground.x, ground.y - jumpY);
     c.scale(unit, unit);
     this.faces.sort((a, b) => b.depth - a.depth);
-    for (const face of this.faces) {
-      // Matching hairline strokes close subpixel seams between mesh faces.
-      renderer.poly(face.points, face.fill, face.fill, .35);
+    for (const [x, y, z] of this.boostOrigins) {
+      const sy = -y * .933 - z * .36;
+      const glow = c.createRadialGradient(x, sy, 1, x, sy, 23);
+      glow.addColorStop(0, '#acdfff6b'); glow.addColorStop(1, '#acdfff00');
+      renderer.ellipse(x, sy + 2, 24, 9, glow);
+      if (p.jump > 0 && !renderer.reducedMotion) {
+        const rise = Math.min(p.jump, 1) * (11 + Math.sin(renderer.time * 13) * 2);
+        renderer.line([{ x: x - 5, y: sy + 3 }, { x: x - 5, y: sy + rise }], '#c2eaff99', 2);
+        renderer.line([{ x: x + 5, y: sy + 3 }, { x: x + 5, y: sy + rise * .7 }], '#c2eaff77', 2);
+      }
     }
+    this.drawMesh(renderer, (game.powerups?.ghost ?? 0) > 0 || game.ghostGrace > 0);
     if (this.smokeOrigin) {
       const [x, y, z] = this.smokeOrigin;
       const sy = -y * .933 - z * .36;

@@ -55,7 +55,8 @@
       const child = iframe.contentWindow;
       const doc = iframe.contentDocument;
       const { game, renderer, audio } = child.__drift;
-      const { SURFBOARD_COST, SURFBOARD_SECONDS, SURFBOARD_HEIGHT } = await import('../src/game.js');
+      const { SURFBOARD_COST, SURFBOARD_SECONDS, SURFBOARD_HEIGHT, POWERUP_DURATIONS } = await import('../src/game.js');
+      const powerNames = ['magnet', 'shield', 'ghost', 'spring'];
       const $ = id => doc.getElementById(id);
       const button = $('surfboard');
       const key = (value, repeat = false) => doc.dispatchEvent(new child.KeyboardEvent('keydown', {
@@ -67,7 +68,12 @@
         game._nextRow = 1e9;
         game._nextSky = 1e9;
       };
-      status.textContent = 'Running surfboard integration checks…';
+      const activeBarState = () => powerNames.map(power => ({
+        remaining: game.powerups[power],
+        width: $(`power-${power}`).querySelector('.power-progress').style.width,
+        label: $(`power-${power}`).querySelector('strong').textContent,
+      }));
+      status.textContent = 'Running surfboard and power-bar integration checks…';
 
       await test('Ready state disables purchase; audio stays off', async () => {
         assert(game.state === 'ready' && button.disabled, 'Purchase should be disabled before starting.');
@@ -78,6 +84,82 @@
         clearTrack();
         await frames();
         assert($('game-shell').dataset.state === 'playing', 'The normal frame loop should display the running game.');
+      });
+
+      await test('Running scene has no popups, arrow buttons, or decorative cards', async () => {
+        assert(!doc.querySelector('#run-message, .touch-controls, #radio-card, .world-caption, #surf-hint, #run-speed'), 'Removed overlays and decorative cards must be absent from the game DOM.');
+        assert(!doc.querySelector('button[data-action]'), 'On-screen arrow and jump buttons must be absent.');
+        assert($('surf-title').textContent === 'Surfboard', 'The compact surfboard label should remain stable.');
+        assert(powerNames.every(power => POWERUP_DURATIONS[power] > 0), 'All four powers must have a defined duration.');
+      });
+
+      await test('All four real pickups create labelled duration bars', async () => {
+        game.objects = powerNames.map((power, i) => ({ id: 7000 + i, type: 'powerup', power, lane: 0, z: .01 }));
+        game.update(.02);
+        await frames();
+        assert(!$('powerups').classList.contains('hidden'), 'Collecting powers should reveal the power bars.');
+        for (const power of powerNames) {
+          const row = $(`power-${power}`);
+          const duration = POWERUP_DURATIONS[power];
+          assert(game.powerups[power] > duration - .3 && game.powerups[power] <= duration, `${power} should activate for its configured duration.`);
+          assert(!row.classList.contains('hidden') && row.querySelector('strong').textContent === `${Math.ceil(game.powerups[power])}s`, `${power} should display its active countdown.`);
+          assert(row.getAttribute('role') === 'progressbar' && Number(row.getAttribute('aria-valuemax')) === duration, `${power} should expose its maximum duration accessibly.`);
+          assert(parseFloat(row.querySelector('.power-progress').style.width) > 90, `${power} should start with a nearly full bar.`);
+        }
+      });
+
+      await test('All four duration bars shrink in proportion to time', async () => {
+        for (const power of powerNames) game.powerups[power] = POWERUP_DURATIONS[power] / 2;
+        game.update(.1);
+        await frames();
+        for (const power of powerNames) {
+          const row = $(`power-${power}`);
+          const width = parseFloat(row.querySelector('.power-progress').style.width);
+          const expected = game.powerups[power] / POWERUP_DURATIONS[power] * 100;
+          assert(width < 50 && width > 40 && Math.abs(width - expected) < .1, `${power} should show its actual remaining fraction.`);
+          assert(row.querySelector('strong').textContent === `${Math.ceil(game.powerups[power])}s`, `${power} text should match its duration bar.`);
+          assert(Math.abs(Number(row.getAttribute('aria-valuenow')) - game.powerups[power]) < .11, `${power} should update its accessible remaining time.`);
+        }
+      });
+
+      await test('390px and 320px mobile layouts keep all five compact bars on the left', async () => {
+        const originalStyle = iframe.getAttribute('style');
+        try {
+          for (const width of [390, 320]) {
+            iframe.style.width = `${width}px`;
+            iframe.style.height = '844px';
+            await frames(4);
+            const shell = $('game-shell').getBoundingClientRect();
+            const rail = doc.querySelector('.boost-rail').getBoundingClientRect();
+            const rows = [$('surf-control'), ...powerNames.map(power => $(`power-${power}`))]
+              .map(row => row.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+            assert(child.innerWidth === width, 'The mobile check must use the actual game viewport width.');
+            assert(doc.documentElement.scrollWidth <= child.innerWidth + 1, `${width}px layout must not overflow horizontally.`);
+            assert(rail.left >= shell.left && rail.left < shell.left + 25 && rail.right <= shell.left + shell.width / 2 + 1, `${width}px boost rail should sit entirely on the left side.`);
+            for (const [i, row] of rows.entries()) {
+              assert(row.width >= 90 && row.width <= 160 && row.height > 0 && row.height < 65, `${width}px duration bars should be compact and visible.`);
+              assert(row.left >= rail.left - 1 && row.right <= rail.right + 1 && row.bottom <= shell.bottom, `${width}px duration bars should remain inside the left rail and game.`);
+              if (i > 0) assert(rows[i - 1].bottom <= row.top + 1, `${width}px duration bars must not overlap.`);
+            }
+          }
+        } finally {
+          if (originalStyle === null) iframe.removeAttribute('style');
+          else iframe.setAttribute('style', originalStyle);
+          await frames(4);
+        }
+      });
+
+      await test('Expired power bars disappear independently and clear as a group', async () => {
+        game.powerups.ghost = .03;
+        game.update(.05);
+        await frames();
+        assert(game.powerups.ghost === 0 && $('power-ghost').classList.contains('hidden'), 'Ghost expiry should hide its row.');
+        assert(['magnet', 'shield', 'spring'].every(power => !$(`power-${power}`).classList.contains('hidden')), 'Ghost expiry must leave the other active rows visible.');
+        for (const power of powerNames) game.powerups[power] = .03;
+        game.update(.05);
+        await frames();
+        assert(powerNames.every(power => game.powerups[power] === 0 && $(`power-${power}`).classList.contains('hidden')), 'Every expired power should hide its duration bar.');
+        assert($('powerups').classList.contains('hidden'), 'The empty power group should disappear.');
       });
 
       await test('199 records: disabled button and B cannot buy', async () => {
@@ -94,7 +176,7 @@
         game.coins = SURFBOARD_COST;
         await frames();
         assert(!button.disabled, 'The purchase button should enable at exactly 200 records.');
-        assert($('surf-price').textContent === '200 records', 'The price should remain 200 records.');
+        assert($('surf-price').textContent === '200', 'The compact price should show 200.');
         assert($('coins').textContent === '200', 'The records HUD should reflect the same balance.');
       });
 
@@ -107,7 +189,7 @@
         clearTrack();
         await frames();
         assert(button.disabled && $('surf-control').classList.contains('riding'), 'Flight should disable purchase and display the riding state.');
-        assert($('surf-title').textContent === 'Cruising the sky', 'The active flight title should render.');
+        assert($('surf-title').textContent === 'Surfboard', 'The compact title should remain stable during flight.');
         assert($('surf-price').textContent === '20s', 'The initial flight countdown should render.');
       });
 
@@ -138,15 +220,17 @@
 
       await test('Pause button freezes flight, powers, distance, and animation', async () => {
         game.surfRemaining = 12;
-        game.powerups = { magnet: 8, shield: 10 };
+        game.powerups = Object.fromEntries(powerNames.map(power => [power, POWERUP_DURATIONS[power] * .8]));
         $('pause').click();
         await frames();
         assert(game.state === 'paused' && button.disabled, 'Pausing should disable the purchase button.');
         assert(!$('overlay').classList.contains('hidden'), 'The pause dialog should open.');
-        const frozen = [game.surfRemaining, game.powerups.magnet, game.powerups.shield, game.distance, game.elapsedTime, renderer.time];
+        const frozen = [game.surfRemaining, ...powerNames.map(power => game.powerups[power]), game.distance, game.elapsedTime, renderer.time];
+        const frozenBars = JSON.stringify(activeBarState());
         await frames(4);
-        const after = [game.surfRemaining, game.powerups.magnet, game.powerups.shield, game.distance, game.elapsedTime, renderer.time];
+        const after = [game.surfRemaining, ...powerNames.map(power => game.powerups[power]), game.distance, game.elapsedTime, renderer.time];
         assert(frozen.every((value, i) => value === after[i]), 'All simulation timers and renderer animation must stay frozen during pause.');
+        assert(JSON.stringify(activeBarState()) === frozenBars, 'All four power-bar widths and labels must stay frozen during pause.');
         key('B');
         assert(game.coins === SURFBOARD_COST, 'B must not spend records while paused.');
       });
@@ -166,7 +250,7 @@
         await frames();
         assert(game.surfRemaining === 0 && game.player.altitude === 0, 'Expiry should return the dolphin to the ground.');
         assert(!button.disabled && !$('surf-control').classList.contains('riding'), 'An affordable new purchase should enable after expiry.');
-        assert($('surf-price').textContent === '200 records', 'Expiry should restore the purchase price.');
+        assert($('surf-price').textContent === '200', 'Expiry should restore the compact purchase price.');
       });
 
       await test('B keyboard listener purchases the next flight', async () => {
@@ -182,9 +266,10 @@
         $('home').click();
         await frames();
         assert(game.state === 'ready' && game.surfRemaining === 0 && game.coins === 0 && game.player.altitude === 0, 'Home should reset all run and flight state.');
-        assert(game.powerups.magnet === 0 && game.powerups.shield === 0, 'Home should clear the remaining powers.');
+        assert(powerNames.every(power => game.powerups[power] === 0 && $(`power-${power}`).classList.contains('hidden')), 'Home should clear all four remaining powers and hide their rows.');
+        assert($('powerups').classList.contains('hidden'), 'Home should hide the empty duration-bar group.');
         assert(button.disabled && !$('surf-control').classList.contains('riding'), 'The reset UI should disable purchase and clear the active flight state.');
-        assert($('surf-price').textContent === '200 records' && !audio.enabled, 'The reset UI should show its normal price with audio still off.');
+        assert($('surf-price').textContent === '200' && !audio.enabled, 'The reset UI should show its compact price with audio still off.');
       });
 
       // Only after assertions pass, arrange a stable flight preview for screenshots.
@@ -196,7 +281,8 @@
       clearTrack();
       const previewObjects = Array.from({ length: 18 }, (_, i) => ({
         id: 9000 + i, type: 'coin', sky: true, height: SURFBOARD_HEIGHT + .85,
-        lane: [-1, 0, 1][Math.floor(i / 6)], z: 5 + i % 6 * 7,
+        // Hold records beyond magnet range so this fixed preview cannot collect them every frame.
+        lane: [-1, 0, 1][Math.floor(i / 6)], z: 18 + i % 6 * 7,
       }));
       previewObjects.push(
         { id: 9101, type: 'tram', lane: -1, z: 13 },
@@ -208,6 +294,7 @@
         game.coins = 0;
         game.distance = 45;
         game.player.altitude = SURFBOARD_HEIGHT;
+        game.powerups = Object.fromEntries(powerNames.map((power, i) => [power, POWERUP_DURATIONS[power] * (.45 + i * .12)]));
         game.objects = previewObjects.map(object => ({ ...object }));
         renderer.camera = 1;
         renderer.flightCamera = SURFBOARD_HEIGHT;

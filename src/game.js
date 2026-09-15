@@ -2,18 +2,21 @@ const LANES = [-1, 0, 1];
 const START_SPEED = 12;
 const MAX_SPEED = 30;
 const SPEED_GAIN = 0.12;
+const OBSTACLE_PRESSURE = 1.33;
 export const SURFBOARD_COST = 200;
 export const SURFBOARD_SECONDS = 20;
 export const SURFBOARD_HEIGHT = 4.2;
+export const POWERUP_DURATIONS = Object.freeze({ magnet: 10, shield: 12, ghost: 6, spring: 12 });
 const SURFBOARD_RECORD_LIMIT = 96;
 const JUMP_VELOCITY = 8.2;
+const SPRING_JUMP_VELOCITY = 10.8;
 const GRAVITY = 16;
 const SLIDE_SECONDS = 0.85;
 const FIRST_ROW = 100;
 const LOOK_AHEAD = 210;
 const MAX_FRAME = 0.1;
 const STEP = 1 / 120;
-const POWERS = ['magnet', 'shield'];
+const POWERS = Object.keys(POWERUP_DURATIONS);
 const OBSTACLES = ['barrier', 'gate', 'tram', 'crate', 'buoy', 'cart'];
 const MAGNET_RANGE = 12;
 
@@ -31,13 +34,15 @@ export class Game {
     this.elapsedTime = 0;
     this.surfRemaining = 0;
     this.surfLandingGrace = 0;
-    this.powerups = { magnet: 0, shield: 0 };
+    this.powerups = Object.fromEntries(POWERS.map(power => [power, 0]));
     this.shieldGrace = 0;
+    this.ghostGrace = 0;
     this.speed = START_SPEED;
     this.player = {
       lane: 0,
       x: 0,
       jump: 0,
+      springJump: false,
       altitude: 0,
       sliding: false,
       slideRemaining: 0,
@@ -89,7 +94,9 @@ export class Game {
     }
     if (this.surfRemaining > 0) return false;
     if (name === 'jump' && p.jump === 0 && !p.sliding) {
-      this._jumpVelocity = JUMP_VELOCITY;
+      // Capture the launch power so its timer cannot change a jump in midair.
+      p.springJump = this.powerups.spring > 0;
+      this._jumpVelocity = p.springJump ? SPRING_JUMP_VELOCITY : JUMP_VELOCITY;
       // A tiny positive height distinguishes takeoff from standing still.
       p.jump = 0.0001;
       this._events.push({ type: 'jump' });
@@ -111,7 +118,7 @@ export class Game {
     this.surfRemaining = SURFBOARD_SECONDS;
     this.surfLandingGrace = 0;
     Object.assign(this.player, {
-      altitude: SURFBOARD_HEIGHT, jump: 0, sliding: false,
+      altitude: SURFBOARD_HEIGHT, jump: 0, springJump: false, sliding: false,
       slideRemaining: 0, rollProgress: 0,
     });
     this._jumpVelocity = 0;
@@ -150,6 +157,7 @@ export class Game {
       surfLandingGrace: this.surfLandingGrace,
       powerups: { ...this.powerups },
       shieldGrace: this.shieldGrace,
+      ghostGrace: this.ghostGrace,
       speed: this.speed,
       player: { ...this.player },
       objects: this.objects.map(object => ({ ...object })),
@@ -169,8 +177,13 @@ export class Game {
         this._events.push({ type: 'surfboard-end' });
       }
     }
-    this.powerups.magnet = Math.max(0, this.powerups.magnet - dt);
-    this.powerups.shield = Math.max(0, this.powerups.shield - dt);
+    this.ghostGrace = Math.max(0, this.ghostGrace - dt);
+    for (const power of POWERS) {
+      const wasActive = this.powerups[power] > 0;
+      this.powerups[power] = Math.max(0, this.powerups[power] - dt);
+      if (this.powerups[power] < 1e-9) this.powerups[power] = 0;
+      if (power === 'ghost' && wasActive && this.powerups.ghost === 0) this.ghostGrace = 0.65;
+    }
     this.shieldGrace = Math.max(0, this.shieldGrace - dt);
     // Smooth movement uses the actual lateral position for collisions.
     p.x += (p.lane - p.x) * (1 - Math.exp(-16 * dt));
@@ -181,6 +194,7 @@ export class Game {
       this._jumpVelocity -= GRAVITY * dt;
       if (p.jump <= 0) {
         p.jump = 0;
+        p.springJump = false;
         this._jumpVelocity = 0;
       }
     }
@@ -206,8 +220,8 @@ export class Game {
       object._passed = true;
       if (this.surfRemaining > 0 || Math.abs(object.lane - p.x) >= 0.43 || !POWERS.includes(object.power)) continue;
       object.collected = true;
-      if (object.power === 'magnet') this.powerups.magnet = 10;
-      else if (object.power === 'shield') this.powerups.shield = 12;
+      this.powerups[object.power] = POWERUP_DURATIONS[object.power];
+      if (object.power === 'ghost') this.ghostGrace = 0;
       this._events.push({ type: 'powerup', power: object.power });
     }
 
@@ -233,7 +247,12 @@ export class Game {
       // through a blocked pair. Coins retain their smaller collection radius.
       if (laneDistance >= 0.55) continue;
       const cleared = this.surfRemaining > 0 || this.surfLandingGrace > 0
+        || this.powerups.ghost > 0 || this.ghostGrace > 0
         || (['barrier', 'crate', 'buoy'].includes(object.type) && p.jump >= 0.85)
+        || (['tram', 'cart'].includes(object.type) && p.springJump && p.jump >= 2.3)
+        // The green hurdle is 2.05m tall. A powered jump can go over it,
+        // as well as a roll going underneath; it is not an infinite wall.
+        || (object.type === 'gate' && p.springJump && p.jump >= 2.15)
         || (object.type === 'gate' && p.sliding);
       if (!cleared) {
         if (this.shieldGrace > 0) continue;
@@ -285,13 +304,16 @@ export class Game {
       const primaryLane = candidates[Math.floor(this._random() * candidates.length)];
       const difficulty = Math.min(1, this.elapsedTime / 120);
       this._add(OBSTACLES[Math.floor(this._random() * OBSTACLES.length)], primaryLane, row);
-      if (this._random() < 0.2 + difficulty * 0.2) {
+      // Expected hazards per row were 1 + (0.2 + difficulty * 0.2).
+      // Increase that total by 33%, keeping the reserved lane and row spacing.
+      const secondObstacleChance = (1 + 0.2 + difficulty * 0.2) * OBSTACLE_PRESSURE - 1;
+      if (this._random() < secondObstacleChance) {
         const otherLane = candidates.find(lane => lane !== primaryLane);
         this._add(OBSTACLES[Math.floor(this._random() * OBSTACLES.length)], otherLane, row);
       }
       // Every row reserves a clear, coin-marked lane, with a long reaction gap.
       this._rowCount += 1;
-      if (this._rowCount % 3 === 0) {
+      if (this._rowCount % 4 === 0) {
         this._add('powerup', safeLane, row - 22, { power: POWERS[this._nextPower] });
         this._nextPower = (this._nextPower + 1) % POWERS.length;
       }

@@ -21,7 +21,7 @@
     </header>
 
     <main class="game-shell" id="game-shell" data-state="ready">
-      <canvas id="world" tabindex="0" aria-label="A Jamaican dolphin running along a futuristic seaside boardwalk. Use left and right arrows to switch lanes, up or Space to jump, and down or S to roll under gates. Collect magnets and shields. Spend 200 records on a 20-second flying surfboard with the button or B, then steer between lanes to collect sky records."></canvas>
+      <canvas id="world" tabindex="0" aria-label="Dolphin Drift. Use arrows or WASD to move, jump, and roll. On touchscreens, swipe to move or tap to jump. Collect Magnet, Shield, Ghost, and Super jump powerups. Spend 200 records on a 20-second flying surfboard with the button or B, then steer between lanes for sky records."></canvas>
       <div class="scene-grain" aria-hidden="true"></div>
 
       <div class="scene-label"><span class="scene-label-dot"></span><span>THE PALM LINE</span><span class="scene-label-divider"></span><span>27° & EASY</span></div>
@@ -42,26 +42,34 @@
 
       <div class="character-label" id="character-label"><span class="label-line"></span><span>MEET DUB<span class="character-subtitle">Locally grown. Ocean roaming.</span></span></div>
 
-      <div class="run-message" id="run-message" role="status" aria-live="polite"></div>
-      <div class="surf-control" id="surf-control">
-        <button id="surfboard" class="surf-button" disabled aria-describedby="surf-hint">
-          <svg viewBox="0 0 44 44" fill="none" aria-hidden="true"><path d="M8 32C8 19 22 7 37 6c-1 15-13 29-26 30Z" fill="#e9bd61" stroke="currentColor" stroke-width="1.7"/><path d="m11 33 22-23" stroke="#f8f2cf" stroke-width="4"/><path d="m8 24-4 4m14 8-5 4M5 35l-2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <span><strong id="surf-title">Fly on a surfboard</strong><small>ABOVE THE PALM LINE <kbd>B</kbd></small></span>
-          <span id="surf-price" class="surf-price">200 records</span>
-        </button>
-        <div class="surf-progress" aria-hidden="true"><i id="surf-progress"></i></div>
-        <div class="surf-info"><span id="surf-hint">0 / 200 records · 20s flight</span><span id="run-speed">12.0 m/s</span></div>
-      </div>
-      <div class="powerups hidden" id="powerups" role="group" aria-label="Active powerups">
-        <div class="power-badge power-magnet hidden" id="power-magnet" title="Magnet attracts nearby records">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v7a6 6 0 0 0 12 0V4h-4v7a2 2 0 0 1-4 0V4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 7h4m4 0h4" stroke="currentColor" stroke-width="1.8"/></svg><span class="power-name">Magnet</span><strong>10s</strong>
+      <aside class="boost-rail" aria-label="Surfboard and active powerups">
+        <div class="surf-control" id="surf-control">
+          <button id="surfboard" class="surf-button" disabled>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19C4 11 12 4 21 3c-1 9-8 17-16 17Z" stroke="currentColor" stroke-width="1.6"/><path d="M6 18 18 6" stroke="currentColor" stroke-width="1.3"/></svg>
+            <strong id="surf-title">Surfboard</strong>
+            <span id="surf-price">200</span><span class="surf-cost-record" aria-hidden="true">◉</span>
+          </button>
+          <div class="meter-track" id="surf-meter" role="progressbar" aria-label="Records toward a surfboard" aria-valuemin="0" aria-valuemax="200" aria-valuenow="0"><i id="surf-progress"></i></div>
         </div>
-        <div class="power-badge power-shield hidden" id="power-shield" title="Shield saves one hit before the timer expires">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 3v5c0 4-6 8-6 8s-6-4-6-8V5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 10 2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="power-name">Shield</span><strong>12s</strong>
+        <div class="powerups hidden" id="powerups" role="group" aria-label="Active powerups">
+          <div class="power-meter power-magnet hidden" id="power-magnet" role="progressbar" aria-label="Magnet remaining" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0" title="Magnet: attracts nearby records for 10 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v7a6 6 0 0 0 12 0V4h-4v7a2 2 0 0 1-4 0V4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 7h4m4 0h4" stroke="currentColor" stroke-width="1.8"/></svg><span>Magnet</span><strong>10s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-shield hidden" id="power-shield" role="progressbar" aria-label="Shield remaining" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0" title="Shield: absorbs one hit within 12 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 3v5c0 4-6 8-6 8s-6-4-6-8V5Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Shield</span><strong>12s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-ghost hidden" id="power-ghost" role="progressbar" aria-label="Ghost remaining" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0" title="Ghost: pass through obstacles for 6 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 17V8a6 6 0 0 1 12 0v9l-3-2-3 2-3-2Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 7v2m4-2v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Ghost</span><strong>6s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-spring hidden" id="power-spring" role="progressbar" aria-label="Super jump remaining" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0" title="Super jump: jump high enough to clear green hurdles, carts, and trams for 12 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5-5 5 5M10 2v8m-4 3 8 2-8 2 8 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Super jump</span><strong>12s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
         </div>
-      </div>
-      <div class="world-caption"><span class="orbit-icon" aria-hidden="true">✳</span><span>LOW PRESSURE.<br>HIGH TIDES.</span></div>
-      <div class="radio-card" id="radio-card"><span class="vinyl" aria-hidden="true"><i></i></span><div><span class="radio-eyebrow">NEO KINGSTON SOUND SYSTEM</span><strong>Sunset skank <span id="radio-status">/ 78 BPM</span></strong></div><span class="radio-led" aria-hidden="true"></span></div>
+      </aside>
 
       <div class="overlay hidden" id="overlay">
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -74,9 +82,6 @@
         </section>
       </div>
 
-      <div class="touch-controls" aria-label="Touch controls">
-        <button data-action="left" aria-label="Move left">←</button><button data-action="right" aria-label="Move right">→</button><span></span><button data-action="slide" aria-label="Roll">↓</button><button data-action="jump" aria-label="Jump">↑</button>
-      </div>
     </main>
 
     <footer class="footer">

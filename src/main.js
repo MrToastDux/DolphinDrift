@@ -1,4 +1,4 @@
-import { Game, SURFBOARD_COST, SURFBOARD_SECONDS } from './game.js';
+import { Game, SURFBOARD_COST, SURFBOARD_SECONDS, POWERUP_DURATIONS } from './game.js';
 import { Renderer } from './renderer.js';
 import { IslandAudio } from './audio.js';
 
@@ -10,39 +10,31 @@ const shell = $('game-shell');
 let best = 0;
 try { best = Math.max(0, Number(localStorage.getItem('dolphin-drift-best')) || 0); } catch { /* Play works without storage. */ }
 let lastState = '';
-let messageTimer;
-let tutorialTimer;
 let previousTime = performance.now();
 let elapsed = 0;
 let savedFocus = null;
 let audioWanted = false;
 let radioChosen = false;
-const powerupMessages = {
-  magnet: 'Magnet on. Records come to you for 10s.',
-  shield: 'Shield on. One hit covered for 12s.',
-};
-
 function syncPowerups() {
-  const remaining = {
-    magnet: game.powerups?.magnet || 0,
-    shield: game.powerups?.shield || 0,
-  };
-  const names = { magnet: 'Record magnet', shield: 'One-hit shield' };
+  const names = { magnet: 'Magnet', shield: 'Shield', ghost: 'Ghost', spring: 'Super jump' };
   let active = false;
-  for (const [power, seconds] of Object.entries(remaining)) {
-    const badge = $(`power-${power}`);
-    badge.classList.toggle('hidden', seconds <= 0);
+  for (const [power, duration] of Object.entries(POWERUP_DURATIONS)) {
+    const seconds = game.powerups[power] || 0;
+    const meter = $(`power-${power}`);
+    meter.classList.toggle('hidden', seconds <= 0);
+    meter.querySelector('.power-progress').style.width = `${Math.min(1, seconds / duration) * 100}%`;
+    meter.setAttribute('aria-valuenow', seconds.toFixed(1));
+    meter.setAttribute('aria-valuemax', duration);
     if (seconds > 0) {
       active = true;
       const label = `${Math.ceil(seconds)}s`;
-      if (badge.querySelector('strong').textContent !== label || !badge.hasAttribute('aria-label')) {
-        badge.querySelector('strong').textContent = label;
-        badge.setAttribute('aria-label', `${names[power]}: ${Math.ceil(seconds)} seconds remaining`);
+      if (meter.querySelector('strong').textContent !== label || !meter.hasAttribute('aria-valuetext')) {
+        meter.querySelector('strong').textContent = label;
+        meter.setAttribute('aria-valuetext', `${names[power]}: ${Math.ceil(seconds)} seconds remaining`);
       }
     }
   }
   $('powerups').classList.toggle('hidden', !active);
-  shell.classList.toggle('has-powerups', active);
 }
 
 function syncSurfboard() {
@@ -52,28 +44,21 @@ function syncSurfboard() {
   button.disabled = game.state !== 'playing' || riding || !affordable;
   $('surf-control').classList.toggle('riding', riding);
   $('surf-control').classList.toggle('affordable', affordable && !riding);
-  $('surf-title').textContent = riding ? 'Cruising the sky' : 'Fly on a surfboard';
-  $('surf-price').textContent = riding ? `${Math.ceil(game.surfRemaining)}s` : `${SURFBOARD_COST} records`;
-  $('surf-hint').textContent = riding
-    ? 'Steer left / right for sky records'
-    : affordable ? `${SURFBOARD_SECONDS}s flight · Click or press B` : `${game.coins} / ${SURFBOARD_COST} records · ${SURFBOARD_SECONDS}s flight`;
+  $('surf-price').textContent = riding ? `${Math.ceil(game.surfRemaining)}s` : `${SURFBOARD_COST}`;
   const progress = riding ? game.surfRemaining / SURFBOARD_SECONDS : Math.min(1, game.coins / SURFBOARD_COST);
   $('surf-progress').style.width = `${progress * 100}%`;
-  $('run-speed').textContent = `${game.speed.toFixed(1)} m/s`;
+  $('surf-meter').setAttribute('aria-label', riding ? 'Surfboard flight remaining' : 'Records toward a surfboard');
+  $('surf-meter').setAttribute('aria-valuemax', riding ? SURFBOARD_SECONDS : SURFBOARD_COST);
+  $('surf-meter').setAttribute('aria-valuenow', riding ? game.surfRemaining.toFixed(1) : Math.min(game.coins, SURFBOARD_COST));
   const label = riding ? `Surfboard flight: ${Math.ceil(game.surfRemaining)} seconds remaining`
     : `Buy a ${SURFBOARD_SECONDS}-second surfboard flight for ${SURFBOARD_COST} records${affordable ? '' : `; ${SURFBOARD_COST - game.coins} more needed`}`;
-  if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
-}
-
-function message(text, seconds = 2.8) {
-  clearTimeout(messageTimer);
-  $('run-message').textContent = text;
-  $('run-message').classList.add('visible');
-  messageTimer = setTimeout(() => $('run-message').classList.remove('visible'), seconds * 1000);
+  if (button.getAttribute('aria-label') !== label) {
+    button.setAttribute('aria-label', label);
+    button.title = riding ? label : `${label}. Click or press B.`;
+  }
 }
 
 function start() {
-  clearTimeout(tutorialTimer);
   $('start').blur();
   game.start();
   if (!radioChosen) {
@@ -85,10 +70,6 @@ function start() {
     });
   }
   renderer.particles = [];
-  message('Easy feet. Good beats.', 2.4);
-  tutorialTimer = setTimeout(() => {
-    if (game.state === 'playing') message('Follow the golden records ↗', 3);
-  }, 4200);
   syncState();
   $('world').focus({ preventScroll: true });
 }
@@ -115,8 +96,6 @@ function syncState() {
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 10 7-10 7Z" fill="currentColor"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>';
   if (isOverlay) {
-    clearTimeout(tutorialTimer);
-    $('run-message').classList.remove('visible');
     savedFocus = document.activeElement;
     const over = game.state === 'over';
     $('modal-eyebrow').textContent = over ? 'EVERY DRIFT IS A GOOD DRIFT' : 'TAKE A BREATHER';
@@ -148,11 +127,8 @@ $('surfboard').addEventListener('click', () => {
   if (game.state === 'playing') $('world').focus({ preventScroll: true });
 });
 $('home').addEventListener('click', () => {
-  clearTimeout(tutorialTimer);
-  clearTimeout(messageTimer);
   game.reset();
   renderer.particles = [];
-  $('run-message').classList.remove('visible');
   syncState();
 });
 
@@ -160,8 +136,6 @@ function syncRadio() {
   $('sound').setAttribute('aria-pressed', String(audio.enabled));
   $('sound').setAttribute('aria-label', audio.enabled ? 'Turn off island radio' : 'Turn on island radio');
   $('sound-label').textContent = audio.enabled ? 'Island radio' : 'Sound off';
-  $('radio-card').classList.toggle('on-air', audio.enabled);
-  $('radio-status').textContent = audio.enabled ? '/ ON AIR' : '/ 78 BPM';
 }
 
 $('sound').addEventListener('click', async () => {
@@ -169,7 +143,7 @@ $('sound').addEventListener('click', async () => {
   audioWanted = !audioWanted;
   if (audioWanted) {
     const enabled = await audio.enable();
-    if (!enabled) { audioWanted = false; message('Radio is taking a breather. Try again.'); }
+    if (!enabled) audioWanted = false;
   } else audio.disable();
   syncRadio();
   if (game.state === 'playing') $('world').focus({ preventScroll: true });
@@ -200,15 +174,6 @@ document.addEventListener('keydown', event => {
   else if (game.state === 'playing') game.action(action);
 });
 
-document.querySelectorAll('[data-action]').forEach(button => {
-  button.addEventListener('pointerdown', event => {
-    event.preventDefault();
-    game.action(button.dataset.action);
-  });
-  button.addEventListener('click', event => {
-    if (event.detail === 0) game.action(button.dataset.action);
-  });
-});
 let touchStart = null;
 $('world').addEventListener('pointerdown', event => {
   if (event.pointerType === 'mouse') return;
@@ -249,10 +214,6 @@ function frame(now) {
     for (const event of game.drainEvents()) {
       audio.effect(event.type);
       renderer.burst(event.type, game, event);
-      if (event.type === 'surfboard') message('Sky time. Steer left / right to collect records.', 3.2);
-      if (event.type === 'surfboard-end') message('Touching down. Watch the ground ahead.', 2.5);
-      if (event.type === 'powerup') message(powerupMessages[event.power] || 'Good vibes, powered up.', 3.2);
-      if (event.type === 'shield-break') message('Shield saved you. Keep that rhythm.', 2.7);
     }
     syncState();
     $('distance').textContent = Math.floor(game.distance).toLocaleString();

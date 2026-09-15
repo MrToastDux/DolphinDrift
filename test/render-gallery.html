@@ -26,19 +26,21 @@
   <header>
     <h1>Dolphin Drift · Render gallery</h1>
     <p>Fixed gameplay poses · settled cameras · dt 0 · time 1 · no simulation updates or audio</p>
-    <output id="status" role="status">Preparing ten snapshots…</output>
+    <output id="status" role="status">Preparing twelve snapshots…</output>
   </header>
   <main class="gallery">
     <figure><figcaption>01 · Forward walk<small>Neutral powerups; normal walking gait</small></figcaption><canvas aria-label="Dolphin walking forward"></canvas></figure>
     <figure><figcaption>02 · Roll: 22%<small>Entering the forward tumble</small></figcaption><canvas aria-label="Dolphin at 22 percent through a roll"></canvas></figure>
     <figure><figcaption>03 · Roll: 50%<small>Halfway through the rotation</small></figcaption><canvas aria-label="Dolphin halfway through a roll"></canvas></figure>
     <figure><figcaption>04 · Roll: 78%<small>Coming out of the tumble</small></figcaption><canvas aria-label="Dolphin at 78 percent through a roll"></canvas></figure>
-    <figure><figcaption>05 · Both powerups active<small>Magnet 8s · shield 10s</small></figcaption><canvas aria-label="Dolphin with magnet and shield active"></canvas></figure>
-    <figure><figcaption>06 · Powerups on the track<small>Coral magnet · aqua shield · ground records</small></figcaption><canvas aria-label="Magnet and shield pickups with ground records"></canvas></figure>
+    <figure><figcaption>05 · All four powerups active<small>Magnet · shield · ghost · spring shoes</small></figcaption><canvas aria-label="Dolphin with magnet, shield, ghost, and spring shoes active"></canvas></figure>
+    <figure><figcaption>06 · All four track pickups<small>Coral magnet · aqua shield · lavender ghost · blue spring shoes</small></figcaption><canvas aria-label="Magnet, shield, ghost, and spring shoes pickups with ground records"></canvas></figure>
     <figure><figcaption>07 · New ground obstacles<small>Jump over the crate and buoy · dodge the cart</small></figcaption><canvas aria-label="Wooden crate, striped buoy, and beach cart on the ground"></canvas></figure>
-    <figure><figcaption>08 · Surfboard flight<small>Reclined smoking dolphin · sky records · obstacles below</small></figcaption><canvas aria-label="Dolphin lying on his back smoking on a flying surfboard with records ahead in the sky"></canvas></figure>
+    <figure><figcaption>08 · Powered surfboard flight<small>All four powers · reclined smoking dolphin · sky records</small></figcaption><canvas aria-label="Dolphin with all four powers active lying on his back smoking on a flying surfboard with records ahead in the sky"></canvas></figure>
     <figure class="narrow"><figcaption>09 · Flight on a narrow screen<small>300 × 480 canvas · all three lanes of sky records</small></figcaption><canvas aria-label="Narrow portrait view of the flying surfboard and sky records"></canvas></figure>
     <figure><figcaption>10 · Flight pose detail<small>Enlarged dolphin, surfboard, and smoke at a fixed time</small></figcaption><canvas aria-label="Close view of the dolphin reclining on his back and smoking on the surfboard"></canvas></figure>
+    <figure><figcaption>11 · Ghost power<small>Translucent dolphin · lavender glow</small></figcaption><canvas aria-label="Translucent dolphin with the ghost power active"></canvas></figure>
+    <figure><figcaption>12 · Spring shoes<small>Blue shoes · boosted jump · short motion strokes</small></figcaption><canvas aria-label="Dolphin making a boosted jump with blue spring shoes"></canvas></figure>
   </main>
   <script type="module">
     const status = document.getElementById('status');
@@ -47,7 +49,7 @@
       status.textContent = `Render error: ${error?.stack || error?.message || error}`;
     };
     try {
-      const [{ Game, SURFBOARD_HEIGHT }, { Renderer }] = await Promise.all([
+      const [{ Game, SURFBOARD_HEIGHT, POWERUP_DURATIONS }, { Renderer }] = await Promise.all([
         import('../src/game.js'),
         import('../src/renderer.js'),
       ]);
@@ -66,7 +68,7 @@
         game.state = 'playing';
         game.distance = 45;
         game.objects = [];
-        game.powerups = { magnet: 0, shield: 0 };
+        game.powerups = Object.fromEntries(Object.keys(POWERUP_DURATIONS).map(power => [power, 0]));
         game.surfRemaining = 0;
         game.shieldGrace = 0;
         Object.assign(game.player, {
@@ -76,12 +78,14 @@
           slideRemaining: pose === null ? 0 : .85 * (1 - pose),
         });
         if (index === 4) {
-          game.powerups = { magnet: 8, shield: 10 };
+          game.powerups = { ...POWERUP_DURATIONS };
         }
         if (index === 5) {
           game.objects = [
             { id: 1001, type: 'powerup', power: 'magnet', lane: -1, z: 3.5 },
             { id: 1002, type: 'powerup', power: 'shield', lane: 1, z: 5.2 },
+            { id: 1003, type: 'powerup', power: 'ghost', lane: -1, z: 18 },
+            { id: 1004, type: 'powerup', power: 'spring', lane: 1, z: 21 },
             ...Array.from({ length: 5 }, (_, i) => ({ id: 1010 + i, type: 'coin', lane: 0, z: 9 + i * 5, height: .85 })),
           ];
         }
@@ -92,15 +96,23 @@
             { id: 1103, type: 'cart', lane: 1, z: 5.2 },
           ];
         }
-        if (index >= 7) {
+        if (index >= 7 && index <= 9) {
           game.surfRemaining = 10;
           game.player.altitude = SURFBOARD_HEIGHT;
           game.objects = skyRecords();
-          if (index === 7) game.objects.push(
-            { id: 2101, type: 'tram', lane: -1, z: 13 },
-            { id: 2102, type: 'gate', lane: 0, z: 9 },
-            { id: 2103, type: 'cart', lane: 1, z: 5 },
-          );
+          if (index === 7) {
+            game.powerups = { ...POWERUP_DURATIONS };
+            game.objects.push(
+              { id: 2101, type: 'tram', lane: -1, z: 13 },
+              { id: 2102, type: 'gate', lane: 0, z: 9 },
+              { id: 2103, type: 'cart', lane: 1, z: 5 },
+            );
+          }
+        }
+        if (index === 10) game.powerups.ghost = POWERUP_DURATIONS.ghost;
+        if (index === 11) {
+          game.powerups.spring = POWERUP_DURATIONS.spring;
+          game.player.jump = 2.3;
         }
         const renderer = new Renderer(canvas);
         renderer.camera = 1;
