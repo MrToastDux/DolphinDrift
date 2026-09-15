@@ -1,6 +1,11 @@
 const LANES = [-1, 0, 1];
 const START_SPEED = 12;
-const MAX_SPEED = 22;
+const MAX_SPEED = 30;
+const SPEED_GAIN = 0.12;
+export const SURFBOARD_COST = 200;
+export const SURFBOARD_SECONDS = 20;
+export const SURFBOARD_HEIGHT = 4.2;
+const SURFBOARD_RECORD_LIMIT = 96;
 const JUMP_VELOCITY = 8.2;
 const GRAVITY = 16;
 const SLIDE_SECONDS = 0.85;
@@ -8,7 +13,8 @@ const FIRST_ROW = 100;
 const LOOK_AHEAD = 210;
 const MAX_FRAME = 0.1;
 const STEP = 1 / 120;
-const POWERS = ['magnet', 'shield', 'double'];
+const POWERS = ['magnet', 'shield'];
+const OBSTACLES = ['barrier', 'gate', 'tram', 'crate', 'buoy', 'cart'];
 const MAGNET_RANGE = 12;
 
 /** Small, rendering-independent simulation. All distances are in metres. */
@@ -22,8 +28,9 @@ export class Game {
     this.state = 'ready';
     this.distance = 0;
     this.coins = 0;
-    this.flow = 0;
-    this.dubRemaining = 0;
+    this.elapsedTime = 0;
+    this.surfRemaining = 0;
+    this.surfLandingGrace = 0;
     this.powerups = { magnet: 0, shield: 0 };
     this.shieldGrace = 0;
     this.speed = START_SPEED;
@@ -31,6 +38,7 @@ export class Game {
       lane: 0,
       x: 0,
       jump: 0,
+      altitude: 0,
       sliding: false,
       slideRemaining: 0,
       rollProgress: 0,
@@ -42,6 +50,9 @@ export class Game {
     this._nextId = 1;
     this._rowCount = 0;
     this._nextPower = 1;
+    this._nextSky = 0;
+    this._skyLane = 0;
+    this._skyRecordCount = 0;
     this._add('powerup', 0, 65, { power: 'magnet' });
     this._fillTrack();
   }
@@ -68,6 +79,7 @@ export class Game {
 
   action(name) {
     if (this.state !== 'playing') return false;
+    if (name === 'surfboard') return this.buySurfboard();
     const p = this.player;
     if (name === 'left' || name === 'right') {
       const lane = Math.max(-1, Math.min(1, p.lane + (name === 'left' ? -1 : 1)));
@@ -75,6 +87,7 @@ export class Game {
       p.lane = lane;
       return true;
     }
+    if (this.surfRemaining > 0) return false;
     if (name === 'jump' && p.jump === 0 && !p.sliding) {
       this._jumpVelocity = JUMP_VELOCITY;
       // A tiny positive height distinguishes takeoff from standing still.
@@ -90,6 +103,26 @@ export class Game {
       return true;
     }
     return false;
+  }
+
+  buySurfboard() {
+    if (this.state !== 'playing' || this.coins < SURFBOARD_COST || this.surfRemaining > 0) return false;
+    this.coins -= SURFBOARD_COST;
+    this.surfRemaining = SURFBOARD_SECONDS;
+    this.surfLandingGrace = 0;
+    Object.assign(this.player, {
+      altitude: SURFBOARD_HEIGHT, jump: 0, sliding: false,
+      slideRemaining: 0, rollProgress: 0,
+    });
+    this._jumpVelocity = 0;
+    // A fresh route begins in the rider's lane, with time to see its first record.
+    this.objects = this.objects.filter(object => !object.sky);
+    this._nextSky = this.distance + Math.max(10, this.speed * 0.75);
+    this._skyLane = this.player.lane;
+    this._skyRecordCount = 0;
+    this._fillSky();
+    this._events.push({ type: 'surfboard' });
+    return true;
   }
 
   update(dt) {
@@ -112,8 +145,9 @@ export class Game {
       state: this.state,
       distance: this.distance,
       coins: this.coins,
-      flow: this.flow,
-      dubRemaining: this.dubRemaining,
+      elapsedTime: this.elapsedTime,
+      surfRemaining: this.surfRemaining,
+      surfLandingGrace: this.surfLandingGrace,
       powerups: { ...this.powerups },
       shieldGrace: this.shieldGrace,
       speed: this.speed,
@@ -124,7 +158,17 @@ export class Game {
 
   _step(dt) {
     const p = this.player;
-    this.dubRemaining = Math.max(0, this.dubRemaining - dt);
+    this.elapsedTime += dt;
+    this.surfLandingGrace = Math.max(0, this.surfLandingGrace - dt);
+    if (this.surfRemaining > 0) {
+      this.surfRemaining = Math.max(0, this.surfRemaining - dt);
+      if (this.surfRemaining < 1e-9) {
+        this.surfRemaining = 0;
+        this.surfLandingGrace = 1.25;
+        p.altitude = 0;
+        this._events.push({ type: 'surfboard-end' });
+      }
+    }
     this.powerups.magnet = Math.max(0, this.powerups.magnet - dt);
     this.powerups.shield = Math.max(0, this.powerups.shield - dt);
     this.shieldGrace = Math.max(0, this.shieldGrace - dt);
@@ -150,7 +194,7 @@ export class Game {
       }
     }
 
-    this.speed = Math.min(MAX_SPEED, START_SPEED + this.distance / 700);
+    this.speed = Math.min(MAX_SPEED, START_SPEED + this.elapsedTime * SPEED_GAIN);
     const movement = this.speed * dt;
     this.distance += movement;
     for (const object of this.objects) object.z -= movement;
@@ -160,19 +204,17 @@ export class Game {
     for (const object of this.objects) {
       if (object.type !== 'powerup' || !crossesPlayer(object)) continue;
       object._passed = true;
-      if (Math.abs(object.lane - p.x) >= 0.43) continue;
+      if (this.surfRemaining > 0 || Math.abs(object.lane - p.x) >= 0.43 || !POWERS.includes(object.power)) continue;
       object.collected = true;
-      if (object.power === 'double') {
-        this.dubRemaining = 10;
-        this.flow = 0;
-      } else if (object.power === 'magnet') this.powerups.magnet = 10;
+      if (object.power === 'magnet') this.powerups.magnet = 10;
       else if (object.power === 'shield') this.powerups.shield = 12;
       this._events.push({ type: 'powerup', power: object.power });
     }
 
     for (const object of this.objects) {
       if (object.type === 'powerup' || object._passed) continue;
-      if (object.type === 'coin' && this.powerups.magnet > 0
+      const reachableRecord = Boolean(object.sky) === (this.surfRemaining > 0);
+      if (object.type === 'coin' && reachableRecord && this.powerups.magnet > 0
           && object.z <= MAGNET_RANGE && object.z + movement > 0) {
         this._collectCoin(object, true);
         continue;
@@ -182,17 +224,16 @@ export class Game {
       const laneDistance = Math.abs(object.lane - p.x);
       if (object.type === 'coin') {
         const height = object.height ?? 0.85;
-        if (laneDistance < 0.43 && Math.abs(height - (0.85 + p.jump)) <= 0.85) {
+        if (reachableRecord && laneDistance < 0.43 && Math.abs(height - (0.85 + p.altitude + p.jump)) <= 0.85) {
           this._collectCoin(object);
-        } else if (this.dubRemaining === 0) {
-          this.flow = 0;
         }
         continue;
       }
       // Neighbouring hazards overlap slightly so a lane change cannot squeeze
       // through a blocked pair. Coins retain their smaller collection radius.
       if (laneDistance >= 0.55) continue;
-      const cleared = (object.type === 'barrier' && p.jump >= 0.85)
+      const cleared = this.surfRemaining > 0 || this.surfLandingGrace > 0
+        || (['barrier', 'crate', 'buoy'].includes(object.type) && p.jump >= 0.85)
         || (object.type === 'gate' && p.sliding);
       if (!cleared) {
         if (this.shieldGrace > 0) continue;
@@ -208,27 +249,22 @@ export class Game {
       }
     }
     this.objects = this.objects.filter(object => object.z > -10 && !object.collected);
-    if (this.state === 'playing') this._fillTrack();
+    if (this.state === 'playing') {
+      this._fillTrack();
+      if (this.surfRemaining > 0) this._fillSky();
+    }
   }
 
   _collectCoin(object, magnetic = false) {
     object.collected = true;
     object._passed = true;
-    this.coins += this.dubRemaining > 0 ? 2 : 1;
+    this.coins += 1;
     const event = { type: 'coin', id: object.id };
     if (magnetic) {
       event.magnetic = true;
       event.from = { lane: object.lane, z: object.z, height: object.height ?? 0.85 };
     }
     this._events.push(event);
-    if (this.dubRemaining === 0) {
-      this.flow += 1;
-      if (this.flow === 8) {
-        this.flow = 0;
-        this.dubRemaining = 10;
-        this._events.push({ type: 'dub' });
-      }
-    }
   }
 
   _random() {
@@ -247,12 +283,11 @@ export class Game {
       const safeLane = LANES[Math.floor(this._random() * LANES.length)];
       const candidates = LANES.filter(lane => lane !== safeLane);
       const primaryLane = candidates[Math.floor(this._random() * candidates.length)];
-      const difficulty = Math.min(1, this.distance / 1400);
-      const types = ['barrier', 'gate', 'tram'];
-      this._add(types[Math.floor(this._random() * types.length)], primaryLane, row);
-      if (this._random() < 0.12 + difficulty * 0.2) {
+      const difficulty = Math.min(1, this.elapsedTime / 120);
+      this._add(OBSTACLES[Math.floor(this._random() * OBSTACLES.length)], primaryLane, row);
+      if (this._random() < 0.2 + difficulty * 0.2) {
         const otherLane = candidates.find(lane => lane !== primaryLane);
-        this._add(types[Math.floor(this._random() * types.length)], otherLane, row);
+        this._add(OBSTACLES[Math.floor(this._random() * OBSTACLES.length)], otherLane, row);
       }
       // Every row reserves a clear, coin-marked lane, with a long reaction gap.
       this._rowCount += 1;
@@ -261,7 +296,33 @@ export class Game {
         this._nextPower = (this._nextPower + 1) % POWERS.length;
       }
       for (let i = 0; i < 4; i += 1) this._add('coin', safeLane, row - 16 + i * 6);
-      this._nextRow += 35 + this._random() * 13;
+      // At top speed, preserve at least 1.25 seconds between hazard rows.
+      const arrivalSpeed = Math.min(MAX_SPEED,
+        Math.sqrt(this.speed * this.speed + 2 * SPEED_GAIN * (row - this.distance)));
+      this._nextRow += Math.max(31, arrivalSpeed * 1.25) + this._random() * 10;
+    }
+  }
+
+  _fillSky() {
+    // Predict the remaining flight distance, including acceleration and its cap.
+    const seconds = Math.max(0, this.surfRemaining - 0.2);
+    const accelerating = Math.min(seconds, (MAX_SPEED - this.speed) / SPEED_GAIN);
+    const flightEnd = this.distance + this.speed * accelerating
+      + SPEED_GAIN * accelerating * accelerating / 2 + MAX_SPEED * (seconds - accelerating);
+    const horizon = Math.min(this.distance + LOOK_AHEAD, flightEnd);
+    while (this._nextSky < horizon && this._skyRecordCount < SURFBOARD_RECORD_LIMIT) {
+      const arrivalSpeed = Math.min(MAX_SPEED,
+        Math.sqrt(this.speed * this.speed + 2 * SPEED_GAIN * (this._nextSky - this.distance)));
+      const spacing = Math.max(3.4, arrivalSpeed * 0.23);
+      for (let i = 0; i < 6 && this._skyRecordCount < SURFBOARD_RECORD_LIMIT; i += 1) {
+        if (this._nextSky >= flightEnd) break;
+        this._add('coin', this._skyLane, this._nextSky, { sky: true, height: SURFBOARD_HEIGHT + 0.85 });
+        this._skyRecordCount += 1;
+        this._nextSky += spacing;
+      }
+      // Every turn is one lane; leave a visible gap after each six-record run.
+      this._nextSky += Math.max(12, arrivalSpeed * 0.9);
+      this._skyLane = this._skyLane === 0 ? (this._random() < 0.5 ? -1 : 1) : 0;
     }
   }
 }

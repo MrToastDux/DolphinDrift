@@ -328,7 +328,7 @@ export class IslandAudio {
       [440, 523.25, 659.25].forEach((frequency, index) => {
         this.tone(frequency, now + index * 0.095, 0.4, 0.075, { fx: true });
       });
-    } else if (name === 'dub') {
+    } else if (name === 'surfboard') {
       const chord = CHORDS[Math.floor(this.step / 8) % 4];
       [...chord, chord[0] + 12, chord[1] + 12].forEach((note, index) => {
         this.tone(hz(note), now + index * .105, .42, .09, {
@@ -336,6 +336,8 @@ export class IslandAudio {
           pan: index % 2 ? .22 : -.22, fx: true, echo: true,
         });
       });
+    } else if (name === 'surfboard-end') {
+      this.tone(660, now, .45, .065, { endFrequency: 330, fx: true, echo: true });
     }
   }
 }

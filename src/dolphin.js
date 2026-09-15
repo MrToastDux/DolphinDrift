@@ -98,25 +98,28 @@ export class DolphinRig {
     }
   }
 
-  build(game, time) {
+  build(game, time, surfing = game.surfRemaining > 0) {
     this.faces.length = 0;
     const p = game.player;
-    const progress = p.sliding ? (p.rollProgress ?? (1 - p.slideRemaining / .85)) : 0;
-    const tuck = p.sliding ? smooth(Math.min(progress / .16, (1 - progress) / .16)) : 0;
-    this.pitch = p.sliding ? TAU * smooth((progress - .08) / .84) : 0;
-    this.centerY = mix(105, 50, tuck);
+    const rolling = p.sliding && !surfing;
+    const progress = rolling ? (p.rollProgress ?? (1 - p.slideRemaining / .85)) : 0;
+    const tuck = rolling ? smooth(Math.min(progress / .16, (1 - progress) / .16)) : 0;
+    this.pitch = surfing ? -Math.PI / 2 : rolling ? TAU * smooth((progress - .08) / .84) : 0;
+    this.centerY = surfing ? 38 : mix(105, 50, tuck);
     const phase = game.state === 'ready' ? time * 3 : game.distance * 1.45;
-    const stride = p.jump > 0 ? 0 : Math.sin(phase) * (1 - tuck);
-    this.bob = p.sliding || p.jump > 0 ? 0 : Math.abs(Math.cos(phase)) * 2;
-    this.yaw = (p.lane - p.x) * .25;
+    const stride = p.jump > 0 || surfing ? 0 : Math.sin(phase) * (1 - tuck);
+    this.bob = surfing ? Math.sin(time * 2) * 2 : rolling || p.jump > 0 ? 0 : Math.abs(Math.cos(phase)) * 2;
+    this.yaw = (surfing ? -1.05 : 0) + (p.lane - p.x) * .25;
     this.lean = (p.lane - p.x) * -.16 + stride * .025;
+    this.smokeOrigin = null;
+    if (surfing) this.buildBoard();
 
     // Shoes point down-track; their heels and alternating raised soles face the camera.
     for (const side of [-1, 1]) {
       const swing = stride * side;
       const hip = [side * 17, 64, 0];
-      const knee = blend([side * 20, 39 + Math.max(0, swing) * 7, swing * 12], [side * 27, 90, 28], tuck);
-      const ankle = blend([side * 20, 13 + Math.max(0, swing) * 15, swing * 18], [side * 23, 78, -14], tuck);
+      const knee = surfing ? [side * 18, 43, 18 + side * 4] : blend([side * 20, 39 + Math.max(0, swing) * 7, swing * 12], [side * 27, 90, 28], tuck);
+      const ankle = surfing ? [side * 14, 16, 4] : blend([side * 20, 13 + Math.max(0, swing) * 15, swing * 18], [side * 23, 78, -14], tuck);
       this.tube(hip, knee, 8, palette.skin);
       this.tube(knee, ankle, 7, palette.light);
       const shoe = [ankle[0], ankle[1] - 5, ankle[2] + 7];
@@ -137,11 +140,11 @@ export class DolphinRig {
     this.ellipsoid([0, 110, 0], blend([34, 53, 28], [35, 34, 31], tuck), palette.skin);
     this.ellipsoid([0, 108, 20], blend([25, 44, 13], [25, 29, 16], tuck), palette.belly);
     // Central dorsal fin is visible from behind and preserves the dolphin silhouette.
-    this.fin([[0, 142, -24], [0, 127, -52], [7, 104, -31], [-7, 104, -31]], 2.5, palette.fin);
+    this.fin([[0, 142, -24], [0, 127, surfing ? -34 : -52], [7, 104, -31], [-7, 104, -31]], 2.5, palette.fin);
 
     for (const side of [-1, 1]) {
       const shoulder = [side * 28, 136, 0];
-      const finEnd = blend([side * (45 + Math.abs(stride) * 4), 96, -stride * side * 15], [side * 26, 91, 34], tuck);
+      const finEnd = surfing ? [side * 39, side === 1 ? 158 : 99, side === 1 ? -8 : 23] : blend([side * (45 + Math.abs(stride) * 4), 96, -stride * side * 15], [side * 26, 91, 34], tuck);
       this.tube(shoulder, finEnd, 7, palette.skin);
       this.ellipsoid(finEnd, [9, 18, 5], palette.fin, -.1 + tuck * 1.1);
       if (side === -1) this.ellipsoid(blend([side * 43, 104, -stride * side * 13], [side * 26, 99, 27], tuck), [9.5, 3, 6], palette.gold);
@@ -153,9 +156,16 @@ export class DolphinRig {
     this.ellipsoid(head, [35, 33, 29], palette.light, headPitch);
     this.ellipsoid(atHead([0, -5, 36]), [14, 10, 28], palette.skin, headPitch);
     this.ellipsoid(atHead([0, -9, 37]), [12, 4, 27], palette.belly, headPitch);
+    if (surfing) {
+      // The snout faces upward as he rests on his back; a small cigarette sits in his mouth.
+      this.ellipsoid(atHead([0, -7, 72]), [2.5, 2.5, 12], palette.cream);
+      this.ellipsoid(atHead([0, -7, 62]), [2.6, 2.6, 4], [187, 134, 77]);
+      this.ellipsoid(atHead([0, -7, 84]), [2.8, 2.8, 2.4], [221, 109, 68]);
+      this.smokeOrigin = this.transform(atHead([0, -7, 87]));
+    }
     for (const side of [-1, 1]) {
-      this.ellipsoid(atHead([side * 27, 0, 18]), [3, 4, 3], palette.dark, headPitch);
-      this.ellipsoid(atHead([side * 28, 1, 18.5]), [1, 1.1, 1], palette.cream, headPitch);
+      this.ellipsoid(atHead([side * 27, 0, 18]), [3, surfing ? 1.6 : 4, 3], palette.dark, headPitch);
+      if (!surfing) this.ellipsoid(atHead([side * 28, 1, 18.5]), [1, 1.1, 1], palette.cream, headPitch);
       this.ellipsoid(atHead([side * 35, -2, -2]), [8, 14, 12], palette.gold, headPitch);
       this.ellipsoid(atHead([side * 40, -2, -2]), [4, 11, 9], palette.dark, headPitch);
     }
@@ -176,37 +186,63 @@ export class DolphinRig {
     this.face([[-9, 17, -31.4], [-9, 19, -31.4], [9, 27, -31.4], [9, 25, -31.4]].map(atHead), palette.gold, true);
   }
 
+  buildBoard() {
+    const pose = { pitch: this.pitch, centerY: this.centerY, lean: this.lean };
+    this.pitch = 0;
+    this.centerY = 0;
+    this.lean *= .45;
+    // The board shares the rider's diagonal direction, with raised ends and a cream deck.
+    this.ellipsoid([0, 104, 0], [45, 6, 145], palette.green);
+    this.ellipsoid([0, 109, 0], [42, 3.6, 141], palette.cream);
+    this.ellipsoid([0, 112, 0], [7, .8, 139], palette.gold);
+    for (const side of [-1, 1]) {
+      this.ellipsoid([side * 14, 112, 0], [3.8, .7, 131], palette.green);
+    }
+    this.fin([[-10, 100, 94], [10, 100, 94], [0, 82, 112]], 1.8, palette.fin);
+    this.ellipsoid([0, 99, -84], [30, 2, 24], [165, 231, 200]);
+    this.ellipsoid([0, 99, 84], [30, 2, 24], [165, 231, 200]);
+    Object.assign(this, pose);
+  }
+
   draw(renderer, game) {
     const c = renderer.ctx, p = game.player;
     const ground = renderer.project(p.x * 1.82, 0, 0);
-    const unit = Math.min(renderer.height * .00155, renderer.width * .00235);
-    const jumpY = p.jump * renderer.focal / 7.5;
-    const shadowSize = 1 - Math.min(p.jump * .16, .3);
+    const altitude = renderer.flightCamera ?? p.altitude ?? 0;
+    const surfing = game.surfRemaining > 0 || altitude > .08;
+    const unit = Math.min(renderer.height * .00155, renderer.width * (surfing ? .00170 : .00235));
+    const jumpY = (p.jump + altitude) * renderer.focal / 7.5;
+    const shadowSize = 1 - Math.min((p.jump + altitude) * .16, .55);
     renderer.ellipse(ground.x, ground.y + 3, 43 * unit * shadowSize, 10 * unit * shadowSize, '#285b4e30');
-    this.build(game, renderer.time);
+    this.build(game, renderer.reducedMotion ? 0 : renderer.time, surfing);
 
-    const centerY = ground.y - jumpY - (p.sliding ? 45 : 100) * unit;
-    if ((game.powerups?.shield ?? 0) > 0 || game.shieldGrace > 0) {
-      const radius = (p.sliding ? 68 : 122) * unit;
+    const centerY = ground.y - jumpY - (surfing ? 45 : p.sliding ? 45 : 100) * unit;
+    if ((game.powerups?.shield ?? 0) > 0 || game.shieldGrace > 0 || game.surfLandingGrace > 0) {
+      const radius = (surfing ? 153 : p.sliding ? 68 : 122) * unit;
       const bubble = c.createRadialGradient(ground.x - radius * .25, centerY - radius * .25, radius * .1, ground.x, centerY, radius);
       bubble.addColorStop(0, '#b7fbe309'); bubble.addColorStop(.80, '#90f2e020'); bubble.addColorStop(1, '#b6ffe85a');
-      renderer.ellipse(ground.x, centerY, radius * .7, radius, bubble);
-      c.beginPath(); c.ellipse(ground.x, centerY, radius * .7, radius, 0, 0, TAU);
+      renderer.ellipse(ground.x, centerY, radius * (surfing ? 1 : .7), radius * (surfing ? .65 : 1), bubble);
+      c.beginPath(); c.ellipse(ground.x, centerY, radius * (surfing ? 1 : .7), radius * (surfing ? .65 : 1), 0, 0, TAU);
       c.strokeStyle = '#cdfce696'; c.lineWidth = 1.8; c.stroke();
     }
     if ((game.powerups?.magnet ?? 0) > 0) {
       c.save();
       for (let i = 0; i < 3; i++) {
         const phase = (renderer.time * .8 + i / 3) % 1;
-        c.beginPath(); c.ellipse(ground.x, ground.y - 6, (35 + phase * 70) * unit, (9 + phase * 20) * unit, 0, 0, TAU);
+        c.beginPath(); c.ellipse(ground.x, ground.y - jumpY - 6, (35 + phase * 70) * unit, (9 + phase * 20) * unit, 0, 0, TAU);
         c.strokeStyle = `rgba(252,182,129,${(1 - phase) * .55})`; c.lineWidth = 1.5; c.stroke();
       }
       c.restore();
     }
-    if (game.dubRemaining > 0) {
-      const glow = c.createRadialGradient(ground.x, centerY, 15 * unit, ground.x, centerY, 125 * unit);
-      glow.addColorStop(0, '#ffe29c3f'); glow.addColorStop(1, '#ffe29c00');
-      renderer.ellipse(ground.x, centerY, 125 * unit, 125 * unit, glow);
+    if (surfing) {
+      const deckY = ground.y - jumpY;
+      const glow = c.createRadialGradient(ground.x, deckY, 3, ground.x, deckY, 145 * unit);
+      glow.addColorStop(0, '#ceffd654'); glow.addColorStop(1, '#ceffd600');
+      renderer.ellipse(ground.x, deckY + 8 * unit, 145 * unit, 30 * unit, glow);
+      for (let i = 0; i < 3; i++) {
+        const flow = renderer.reducedMotion ? .4 : (renderer.time * 1.6 + i / 3) % 1;
+        const x = ground.x - (30 + i * 30) * unit;
+        renderer.line([{ x, y: deckY + (8 + i * 8) * unit }, { x: x + (38 + flow * 60) * unit, y: deckY + (13 + i * 8) * unit }], `rgba(221,255,221,${(1 - flow) * .5})`, 2 * unit);
+      }
     }
 
     c.save();
@@ -217,8 +253,21 @@ export class DolphinRig {
       // Matching hairline strokes close subpixel seams between mesh faces.
       renderer.poly(face.points, face.fill, face.fill, .35);
     }
+    if (this.smokeOrigin) {
+      const [x, y, z] = this.smokeOrigin;
+      const sy = -y * .933 - z * .36;
+      c.lineCap = 'round';
+      for (let i = 0; i < 3; i++) {
+        const phase = renderer.reducedMotion ? .35 + i * .19 : (renderer.time * .35 + i / 3) % 1;
+        const rise = phase * 60;
+        const drift = Math.sin(phase * 5 + i) * (4 + phase * 8);
+        c.beginPath(); c.moveTo(x + drift, sy - rise);
+        c.bezierCurveTo(x + drift - 9, sy - rise - 10, x + drift + 10, sy - rise - 17, x + drift + 3, sy - rise - 28);
+        c.strokeStyle = `rgba(242,244,218,${(1 - phase) * .75})`; c.lineWidth = 2.4 + phase * 3; c.stroke();
+      }
+    }
     c.restore();
-    if (p.sliding && !renderer.reducedMotion) {
+    if (p.sliding && !surfing && !renderer.reducedMotion) {
       c.save();
       c.strokeStyle = '#d9f0c987'; c.lineWidth = 2;
       const progress = p.rollProgress ?? 0;

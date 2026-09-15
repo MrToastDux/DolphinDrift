@@ -11,6 +11,7 @@ export class Renderer {
     this.width = 1;
     this.height = 1;
     this.camera = 0;
+    this.flightCamera = 0;
     this.time = 0;
     this.particles = [];
     this.dolphinRig = new DolphinRig();
@@ -79,8 +80,9 @@ export class Renderer {
       const origin = this.project(event.from.lane * 1.82, event.from.height ?? .85, event.from.z);
       this.flyingRecords.push({ x: origin.x, y: origin.y, life: .36, max: .36 });
     }
-    if (!['coin', 'powerup', 'shield-break'].includes(type) || this.reducedMotion) return;
-    const p = this.project(game.player.x * 1.82, 1.2 + game.player.jump, 0);
+    if (!['coin', 'powerup', 'shield-break', 'surfboard', 'surfboard-end'].includes(type) || this.reducedMotion) return;
+    const altitude = game.player.altitude || 0;
+    const p = this.project(game.player.x * 1.82, altitude + (altitude ? .6 : 1.2) + game.player.jump, 0);
     const count = type === 'coin' ? 9 : 24;
     const color = type === 'shield-break' || event.power === 'shield' ? '#b9ffea' : event.power === 'magnet' ? '#ffc093' : '#ffdf86';
     for (let i = 0; i < count; i++) {
@@ -92,12 +94,14 @@ export class Renderer {
   draw(game, dt, elapsed) {
     const c = this.ctx, w = this.width, h = this.height;
     const running = game.state !== 'ready';
+    const animatedDt = game.state === 'paused' || game.state === 'over' ? 0 : dt;
     this.camera = lerp(this.camera, running ? 1 : 0, 1 - Math.exp(-dt * 3));
-    this.time = elapsed;
+    this.time += animatedDt;
+    this.flightCamera = lerp(this.flightCamera, game.player.altitude || 0, 1 - Math.exp(-animatedDt * 5));
     this.center = w * lerp(w < 700 ? .70 : .665, .5, this.camera);
     this.horizon = h * lerp(w < 700 ? .52 : .36, .34, this.camera);
     this.focal = Math.min(h * 1.12, w * 1.05);
-    this.cameraHeight = (h * .88 - this.horizon) * 7.5 / this.focal;
+    this.cameraHeight = (h * .88 - this.horizon) * 7.5 / this.focal + this.flightCamera * .76;
     this.background();
     this.road(game.distance);
 
@@ -133,16 +137,16 @@ export class Renderer {
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.life -= dt;
+      p.life -= animatedDt;
       if (p.life <= 0) { this.particles.splice(i, 1); continue; }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += 110 * dt;
+      p.x += p.vx * animatedDt;
+      p.y += p.vy * animatedDt;
+      p.vy += 110 * animatedDt;
       c.globalAlpha = p.life / p.max;
       this.ellipse(p.x, p.y, 3, 3, p.color || '#ffdf86');
     }
     c.globalAlpha = 1;
-    const target = this.project(game.player.x * 1.82, 1 + game.player.jump, 0);
+    const target = this.project(game.player.x * 1.82, (game.player.altitude || 0) + .85 + game.player.jump, 0);
     for (let i = this.flyingRecords.length - 1; i >= 0; i--) {
       const record = this.flyingRecords[i];
       if (game.state === 'playing') record.life -= dt;
@@ -156,7 +160,7 @@ export class Renderer {
     if (this.flash > 0) {
       c.fillStyle = `rgba(249,155,117,${this.flash})`;
       c.fillRect(0, 0, w, h);
-      this.flash = Math.max(0, this.flash - dt * 1.3);
+      this.flash = Math.max(0, this.flash - animatedDt * 1.3);
     }
   }
 
@@ -375,8 +379,9 @@ export class Renderer {
     if (type === 'powerup') {
       const p = this.project(x, 1.05 + Math.sin(this.time * 2 + object.id) * .1, z);
       const radius = .43 * p.scale;
-      const colors = { magnet: ['#f5a07c', '#815841'], shield: ['#a2e4d1', '#376e65'], double: ['#f1d57c', '#8a6d34'] };
-      const [bright, ink] = colors[object.power] || colors.double;
+      const colors = { magnet: ['#f5a07c', '#815841'], shield: ['#a2e4d1', '#376e65'] };
+      if (!colors[object.power]) return;
+      const [bright, ink] = colors[object.power];
       this.ellipse(floor.x, floor.y, radius * .9, radius * .19, '#547e6240');
       const glow = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 2);
       glow.addColorStop(0, bright + '69'); glow.addColorStop(1, bright + '00');
@@ -396,22 +401,24 @@ export class Renderer {
         c.beginPath(); c.moveTo(0, -radius * .58); c.lineTo(radius * .48, -radius * .35); c.lineTo(radius * .39, radius * .19); c.quadraticCurveTo(radius * .24, radius * .47, 0, radius * .6); c.quadraticCurveTo(-radius * .24, radius * .47, -radius * .39, radius * .19); c.lineTo(-radius * .48, -radius * .35); c.closePath();
         c.fillStyle = ink; c.fill();
         this.line([{ x: 0, y: -radius * .25 }, { x: 0, y: radius * .30 }], bright, radius * .1);
-      } else {
-        c.fillStyle = ink; c.font = `600 ${radius * 1.1}px Outfit, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('2×', 0, radius * .03);
       }
       if (p.scale > 24) {
         c.font = `600 ${Math.max(6, radius * .28)}px "DM Sans", sans-serif`; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = ink;
-        c.fillText(object.power === 'double' ? 'DOUBLE DUB' : object.power.toUpperCase(), 0, -radius * 1.35);
+        c.fillText(object.power.toUpperCase(), 0, -radius * 1.35);
       }
       c.restore();
       return;
     }
     if (type === 'coin') {
-      const p = this.project(x, .88 + Math.sin(this.time * 2.2 + object.id) * .045, z);
-      const radius = .19 * p.scale;
+      const p = this.project(x, (object.height ?? (object.sky ? 5.05 : .88)) + Math.sin(this.time * 2.2 + object.id) * .045, z);
+      const radius = (object.sky ? .24 : .19) * p.scale;
       const spin = .72 + Math.sin(this.time * 1.8 + object.id * .15) * .18;
-      this.ellipse(floor.x, floor.y, radius * .8, radius * .19, '#547e6240');
-      this.ellipse(p.x, p.y, radius * 1.65, radius * 1.65, '#ffde7e15');
+      if (!object.sky) this.ellipse(floor.x, floor.y, radius * .8, radius * .19, '#547e6240');
+      this.ellipse(p.x, p.y, radius * (object.sky ? 2.2 : 1.65), radius * (object.sky ? 2.2 : 1.65), object.sky ? '#fff1a02d' : '#ffde7e15');
+      if (object.sky) {
+        this.line([{ x: p.x - radius * 1.5, y: p.y }, { x: p.x + radius * 1.5, y: p.y }], '#fff4ba80', Math.max(.6, p.scale * .013));
+        this.line([{ x: p.x, y: p.y - radius * 1.5 }, { x: p.x, y: p.y + radius * 1.5 }], '#fff4ba80', Math.max(.6, p.scale * .013));
+      }
       c.save(); c.translate(p.x, p.y); c.scale(spin, 1);
       this.ellipse(2, 0, radius, radius, '#b48c39');
       const gold = c.createLinearGradient(-radius, -radius, radius, radius);
@@ -433,6 +440,43 @@ export class Renderer {
         this.poly([this.project(xx, .11, z - .01), this.project(xx + .13, .11, z - .01), this.project(xx + .31, .4, z - .01), this.project(xx + .18, .4, z - .01)], '#ffe4a65e');
       }
       this.line([b.tl, b.tr], '#ffebba', Math.max(1, floor.scale * .018));
+    } else if (type === 'crate') {
+      const b = this.box(x, z, 1.30, .91, .84, ['#bb9561', '#d6b982', '#8c7651']);
+      for (const y of [.12, .48, .82]) this.line([this.project(x - .62, y, z - .01), this.project(x + .62, y, z - .01)], '#725d435c', Math.max(1, floor.scale * .026));
+      for (const side of [-1, 1]) {
+        this.box(x + side * .50, z - .024, .10, .91, .045, ['#e2c795', '#efdfb3', '#b1976b']);
+      }
+      this.line([this.project(x - .40, .15, z - .05), this.project(x + .40, .77, z - .05)], '#ead2a4', Math.max(1, floor.scale * .09));
+      this.line([b.tl, b.tr], '#f1dbab', Math.max(1, floor.scale * .017));
+      const p = this.project(x, .47, z - .07);
+      if (p.scale > 26) { c.fillStyle = '#665b40'; c.font = `700 ${p.scale * .115}px sans-serif`; c.textAlign = 'center'; c.fillText('VINYL', p.x, p.y); }
+    } else if (type === 'buoy') {
+      const base = this.project(x, .12, z), middle = this.project(x, .40, z), top = this.project(x, .87, z);
+      const s = floor.scale;
+      this.ellipse(base.x, base.y, .57 * s, .16 * s, '#9b6750');
+      this.poly([{ x: base.x - .48 * s, y: base.y }, { x: base.x + .48 * s, y: base.y }, { x: top.x + .16 * s, y: top.y }, { x: top.x - .16 * s, y: top.y }], '#de9670');
+      this.ellipse(top.x, top.y, .16 * s, .055 * s, '#f4c894');
+      this.poly([{ x: middle.x - .36 * s, y: middle.y + .09 * s }, { x: middle.x + .36 * s, y: middle.y + .09 * s }, { x: middle.x + .29 * s, y: middle.y - .09 * s }, { x: middle.x - .29 * s, y: middle.y - .09 * s }], '#f3e2b5');
+      c.beginPath(); c.ellipse(top.x, top.y - .085 * s, .09 * s, .105 * s, 0, 0, TAU); c.strokeStyle = '#8c6650'; c.lineWidth = Math.max(1, .035 * s); c.stroke();
+      this.line([{ x: top.x - .11 * s, y: top.y + .08 * s }, { x: base.x - .37 * s, y: base.y - .09 * s }], '#f1bc8e', Math.max(1, .04 * s));
+    } else if (type === 'cart') {
+      for (const side of [-1, 1]) {
+        const wheel = this.project(x + side * .53, .20, z - .04);
+        this.ellipse(wheel.x, wheel.y, .14 * wheel.scale, .19 * wheel.scale, '#3d6658');
+        this.ellipse(wheel.x, wheel.y, .055 * wheel.scale, .08 * wheel.scale, '#c4bc84');
+      }
+      this.box(x, z, 1.42, 1.00, 1.15, ['#719576', '#c2c58c', '#4b7e66'], .32);
+      this.box(x, z - .02, 1.53, .12, 1.23, ['#ddb56c', '#f1d594', '#b29660'], 1.32);
+      for (const side of [-1, 1]) this.box(x + side * .62, z + .05, .065, 1.95, .07, ['#6e7753', '#d1c28c', '#54674b'], .40);
+      this.box(x, z - .04, 1.67, .16, 1.36, ['#cf8e64', '#e7ba79', '#a87e55'], 2.22);
+      for (let i = 0; i < 5; i++) this.box(x - .65 + i * .325, z - .056, .16, .17, .027, ['#ebd19a', '#f3ddac', '#c09f68'], 2.17);
+      const sign = this.project(x, .82, z - .03);
+      if (sign.scale > 17) { c.fillStyle = '#f7e6b6'; c.font = `600 ${sign.scale * .115}px sans-serif`; c.textAlign = 'center'; c.fillText('ISLAND VINYL', sign.x, sign.y); }
+      for (const offset of [-.33, .04, .34]) {
+        const record = this.project(x + offset, 1.56, z + .35);
+        this.ellipse(record.x, record.y, record.scale * .19, record.scale * .21, '#304f40');
+        this.ellipse(record.x, record.y, record.scale * .055, record.scale * .06, '#dfba67');
+      }
     } else if (type === 'gate') {
       this.box(x - .72, z, .11, 2.05, .12, ['#548f80', '#b3d0a6', '#397365']);
       this.box(x + .72, z, .11, 2.05, .12, ['#548f80', '#b3d0a6', '#397365']);

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dolphin Drift — UI smoke tests</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f6ef; color: #214e48; font: 14px/1.5 system-ui, sans-serif; }
+    header { padding: 20px 24px 12px; }
+    h1 { margin: 0; font-size: 24px; }
+    p { margin: 4px 0; color: #647c71; }
+    #status { display: block; margin-top: 10px; font-weight: 700; }
+    #status[data-state="failed"], .fail { color: #aa3528; }
+    #results { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 4px 20px; margin: 0; padding: 0 24px 18px; list-style: none; }
+    #results li { padding: 4px 8px; background: #e8eee3; border-radius: 5px; }
+    #results li.fail { background: #f6e0d9; white-space: pre-wrap; }
+    iframe { display: block; width: 100%; height: max(760px, 85vh); border: 0; border-top: 1px solid #cfdccf; }
+    body.preview header, body.preview #results { display: none; }
+    body.preview iframe { height: 100dvh; border: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dolphin Drift · UI smoke tests</h1>
+    <p>Runs the real game and DOM controls in a same-origin iframe. Audio stays off. Reload to rerun.</p>
+    <output id="status" role="status" data-state="running">Waiting for the game…</output>
+  </header>
+  <ol id="results" aria-label="Integration test results"></ol>
+  <iframe id="game" src="../?debug" title="Actual game integration tests and sustained surfboard flight preview"></iframe>
+  <script type="module">
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+    const iframe = document.getElementById('game');
+    let passed = 0;
+    let currentCase = 'Game boot';
+    const startedAt = performance.now();
+    const assert = (condition, description) => { if (!condition) throw new Error(description); };
+    const frames = async (count = 2) => {
+      for (let i = 0; i < count; i++) await new Promise(resolve => requestAnimationFrame(resolve));
+    };
+    const test = async (name, run) => {
+      currentCase = name;
+      await run();
+      const item = document.createElement('li');
+      item.textContent = `PASS · ${name}`;
+      results.append(item);
+      passed++;
+    };
+    try {
+      while (!iframe.contentWindow?.__drift) {
+        assert(performance.now() - startedAt < 8000, 'The opt-in game debug hook did not load within 8 seconds.');
+        await frames(1);
+      }
+      const child = iframe.contentWindow;
+      const doc = iframe.contentDocument;
+      const { game, renderer, audio } = child.__drift;
+      const { SURFBOARD_COST, SURFBOARD_SECONDS, SURFBOARD_HEIGHT } = await import('../src/game.js');
+      const $ = id => doc.getElementById(id);
+      const button = $('surfboard');
+      const key = (value, repeat = false) => doc.dispatchEvent(new child.KeyboardEvent('keydown', {
+        key: value, repeat, bubbles: true, cancelable: true,
+      }));
+      // No random hazards or incidental record pickups may influence UI assertions.
+      const clearTrack = () => {
+        game.objects = [];
+        game._nextRow = 1e9;
+        game._nextSky = 1e9;
+      };
+      status.textContent = 'Running surfboard integration checks…';
+
+      await test('Ready state disables purchase; audio stays off', async () => {
+        assert(game.state === 'ready' && button.disabled, 'Purchase should be disabled before starting.');
+        assert(!audio.enabled, 'The harness must not enable audio.');
+        assert(!doc.querySelector('#power-double'), 'The removed double-record badge must not exist.');
+        // Bypasses the start button's intentional radio activation only.
+        game.start();
+        clearTrack();
+        await frames();
+        assert($('game-shell').dataset.state === 'playing', 'The normal frame loop should display the running game.');
+      });
+
+      await test('199 records: disabled button and B cannot buy', async () => {
+        game.coins = SURFBOARD_COST - 1;
+        await frames();
+        assert(button.disabled, 'The purchase button must be disabled at 199 records.');
+        assert(button.getAttribute('aria-label').includes('1 more needed'), 'Accessible label should report one missing record.');
+        button.click();
+        key('B');
+        assert(game.coins === 199 && game.surfRemaining === 0, 'Neither control may buy without 200 records.');
+      });
+
+      await test('200 records: normal frame loop enables purchase', async () => {
+        game.coins = SURFBOARD_COST;
+        await frames();
+        assert(!button.disabled, 'The purchase button should enable at exactly 200 records.');
+        assert($('surf-price').textContent === '200 records', 'The price should remain 200 records.');
+        assert($('coins').textContent === '200', 'The records HUD should reflect the same balance.');
+      });
+
+      await test('Actual button click spends 200 and starts flight', async () => {
+        button.click();
+        assert(game.coins === 0, 'A click must charge exactly 200 records.');
+        assert(game.surfRemaining === SURFBOARD_SECONDS, 'A click must start a full flight.');
+        assert(game.player.altitude === SURFBOARD_HEIGHT, 'A click must raise the dolphin to surfboard height.');
+        assert(game.objects.some(object => object.sky && object.type === 'coin'), 'Purchase should generate collectible sky records.');
+        clearTrack();
+        await frames();
+        assert(button.disabled && $('surf-control').classList.contains('riding'), 'Flight should disable purchase and display the riding state.');
+        assert($('surf-title').textContent === 'Cruising the sky', 'The active flight title should render.');
+        assert($('surf-price').textContent === '20s', 'The initial flight countdown should render.');
+      });
+
+      await test('Repeated button clicks and B cannot charge during flight', async () => {
+        game.coins = SURFBOARD_COST;
+        await frames();
+        const remaining = game.surfRemaining;
+        button.click();
+        button.click();
+        key('b');
+        key('B');
+        key('B', true);
+        assert(game.coins === SURFBOARD_COST, 'Repeated controls must not spend another 200 while flying, even with funds available.');
+        assert(game.surfRemaining === remaining, 'Repeated controls must not renew the current flight timer.');
+      });
+
+      await test('Countdown, accessible label, and progress update', async () => {
+        game.surfRemaining = 1.5;
+        await frames();
+        assert($('surf-price').textContent === '2s', 'Countdown should round up to 2 seconds.');
+        const before = parseFloat($('surf-progress').style.width);
+        for (let i = 0; i < 7; i++) game.update(.1);
+        await frames();
+        assert($('surf-price').textContent === '1s', 'Countdown should update after elapsed simulation time.');
+        assert(button.getAttribute('aria-label').includes('1 seconds remaining'), 'Accessible countdown should stay in sync.');
+        assert(parseFloat($('surf-progress').style.width) < before, 'The flight progress bar should decrease.');
+      });
+
+      await test('Pause button freezes flight, powers, distance, and animation', async () => {
+        game.surfRemaining = 12;
+        game.powerups = { magnet: 8, shield: 10 };
+        $('pause').click();
+        await frames();
+        assert(game.state === 'paused' && button.disabled, 'Pausing should disable the purchase button.');
+        assert(!$('overlay').classList.contains('hidden'), 'The pause dialog should open.');
+        const frozen = [game.surfRemaining, game.powerups.magnet, game.powerups.shield, game.distance, game.elapsedTime, renderer.time];
+        await frames(4);
+        const after = [game.surfRemaining, game.powerups.magnet, game.powerups.shield, game.distance, game.elapsedTime, renderer.time];
+        assert(frozen.every((value, i) => value === after[i]), 'All simulation timers and renderer animation must stay frozen during pause.');
+        key('B');
+        assert(game.coins === SURFBOARD_COST, 'B must not spend records while paused.');
+      });
+
+      await test('Resume button returns to flight and ticking timers', async () => {
+        const remaining = game.surfRemaining;
+        $('resume').click();
+        await frames();
+        assert(game.state === 'playing' && $('overlay').classList.contains('hidden'), 'Resume should close the dialog and continue the game.');
+        assert(game.surfRemaining < remaining && game.surfRemaining > 0, 'The resumed flight timer should continue decreasing.');
+      });
+
+      await test('Flight expiry restores purchase at 200 records', async () => {
+        clearTrack();
+        game.surfRemaining = .03;
+        game.update(.05);
+        await frames();
+        assert(game.surfRemaining === 0 && game.player.altitude === 0, 'Expiry should return the dolphin to the ground.');
+        assert(!button.disabled && !$('surf-control').classList.contains('riding'), 'An affordable new purchase should enable after expiry.');
+        assert($('surf-price').textContent === '200 records', 'Expiry should restore the purchase price.');
+      });
+
+      await test('B keyboard listener purchases the next flight', async () => {
+        key('B');
+        assert(game.coins === 0 && game.surfRemaining === SURFBOARD_SECONDS, 'B should charge 200 and start the next full flight.');
+        clearTrack();
+        await frames();
+        assert(button.disabled && $('surf-control').classList.contains('riding'), 'Keyboard purchase should update the normal UI.');
+      });
+
+      await test('Home button resets flight, balance, altitude, and powers', async () => {
+        $('pause').click();
+        $('home').click();
+        await frames();
+        assert(game.state === 'ready' && game.surfRemaining === 0 && game.coins === 0 && game.player.altitude === 0, 'Home should reset all run and flight state.');
+        assert(game.powerups.magnet === 0 && game.powerups.shield === 0, 'Home should clear the remaining powers.');
+        assert(button.disabled && !$('surf-control').classList.contains('riding'), 'The reset UI should disable purchase and clear the active flight state.');
+        assert($('surf-price').textContent === '200 records' && !audio.enabled, 'The reset UI should show its normal price with audio still off.');
+      });
+
+      // Only after assertions pass, arrange a stable flight preview for screenshots.
+      game.start();
+      clearTrack();
+      game.coins = SURFBOARD_COST;
+      await frames();
+      button.click();
+      clearTrack();
+      const previewObjects = Array.from({ length: 18 }, (_, i) => ({
+        id: 9000 + i, type: 'coin', sky: true, height: SURFBOARD_HEIGHT + .85,
+        lane: [-1, 0, 1][Math.floor(i / 6)], z: 5 + i % 6 * 7,
+      }));
+      previewObjects.push(
+        { id: 9101, type: 'tram', lane: -1, z: 13 },
+        { id: 9102, type: 'gate', lane: 0, z: 9 },
+        { id: 9103, type: 'cart', lane: 1, z: 5 },
+      );
+      const keepPreview = () => {
+        game.surfRemaining = 12;
+        game.coins = 0;
+        game.distance = 45;
+        game.player.altitude = SURFBOARD_HEIGHT;
+        game.objects = previewObjects.map(object => ({ ...object }));
+        renderer.camera = 1;
+        renderer.flightCamera = SURFBOARD_HEIGHT;
+        requestAnimationFrame(keepPreview);
+      };
+      keepPreview();
+      await frames();
+      status.dataset.state = 'passed';
+      status.textContent = `PASS · All ${passed} integration checks passed. The game below is held in flight for visual review.`;
+      if (new URLSearchParams(location.search).has('preview')) document.body.classList.add('preview');
+    } catch (error) {
+      status.dataset.state = 'failed';
+      status.textContent = `FAIL · ${currentCase}. ${passed} earlier checks passed.`;
+      const item = document.createElement('li');
+      item.className = 'fail';
+      item.textContent = `FAIL · ${currentCase}\n${error?.stack || error}`;
+      results.append(item);
+    }
+  </script>
+</body>
+</html>

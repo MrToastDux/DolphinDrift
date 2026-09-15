@@ -17,22 +17,28 @@
     figcaption { padding: 11px 16px; font-weight: 650; }
     figcaption small { display: block; font-weight: 400; font-size: 11px; color: #647c71; }
     canvas { display: block; width: 100%; height: 350px; }
+    figure.narrow { background: #e4ece0; }
+    figure.narrow canvas { width: min(300px, 100%); height: 480px; margin: auto; }
     @media (max-width: 720px) { body { padding: 14px; } .gallery { grid-template-columns: 1fr; gap: 16px; } }
   </style>
 </head>
 <body>
   <header>
     <h1>Dolphin Drift · Render gallery</h1>
-    <p>Fixed gameplay poses · camera 1 · dt 0 · time 1 · no simulation updates or audio</p>
-    <output id="status" role="status">Preparing six snapshots…</output>
+    <p>Fixed gameplay poses · settled cameras · dt 0 · time 1 · no simulation updates or audio</p>
+    <output id="status" role="status">Preparing ten snapshots…</output>
   </header>
   <main class="gallery">
     <figure><figcaption>01 · Forward walk<small>Neutral powerups; normal walking gait</small></figcaption><canvas aria-label="Dolphin walking forward"></canvas></figure>
     <figure><figcaption>02 · Roll: 22%<small>Entering the forward tumble</small></figcaption><canvas aria-label="Dolphin at 22 percent through a roll"></canvas></figure>
     <figure><figcaption>03 · Roll: 50%<small>Halfway through the rotation</small></figcaption><canvas aria-label="Dolphin halfway through a roll"></canvas></figure>
     <figure><figcaption>04 · Roll: 78%<small>Coming out of the tumble</small></figcaption><canvas aria-label="Dolphin at 78 percent through a roll"></canvas></figure>
-    <figure><figcaption>05 · All powerups active<small>Magnet 8s · shield 10s · double records 8s</small></figcaption><canvas aria-label="Dolphin with magnet, shield, and double records active"></canvas></figure>
-    <figure><figcaption>06 · Powerups on the track<small>Coral magnet · aqua shield · golden double records</small></figcaption><canvas aria-label="Three collectible powerups across the track lanes"></canvas></figure>
+    <figure><figcaption>05 · Both powerups active<small>Magnet 8s · shield 10s</small></figcaption><canvas aria-label="Dolphin with magnet and shield active"></canvas></figure>
+    <figure><figcaption>06 · Powerups on the track<small>Coral magnet · aqua shield · ground records</small></figcaption><canvas aria-label="Magnet and shield pickups with ground records"></canvas></figure>
+    <figure><figcaption>07 · New ground obstacles<small>Jump over the crate and buoy · dodge the cart</small></figcaption><canvas aria-label="Wooden crate, striped buoy, and beach cart on the ground"></canvas></figure>
+    <figure><figcaption>08 · Surfboard flight<small>Reclined smoking dolphin · sky records · obstacles below</small></figcaption><canvas aria-label="Dolphin lying on his back smoking on a flying surfboard with records ahead in the sky"></canvas></figure>
+    <figure class="narrow"><figcaption>09 · Flight on a narrow screen<small>300 × 480 canvas · all three lanes of sky records</small></figcaption><canvas aria-label="Narrow portrait view of the flying surfboard and sky records"></canvas></figure>
+    <figure><figcaption>10 · Flight pose detail<small>Enlarged dolphin, surfboard, and smoke at a fixed time</small></figcaption><canvas aria-label="Close view of the dolphin reclining on his back and smoking on the surfboard"></canvas></figure>
   </main>
   <script type="module">
     const status = document.getElementById('status');
@@ -41,50 +47,90 @@
       status.textContent = `Render error: ${error?.stack || error?.message || error}`;
     };
     try {
-      const [{ Game }, { Renderer }] = await Promise.all([
+      const [{ Game, SURFBOARD_HEIGHT }, { Renderer }] = await Promise.all([
         import('../src/game.js'),
         import('../src/renderer.js'),
       ]);
-      const poses = [null, .22, .5, .78, null, null];
+      const poses = [null, .22, .5, .78];
+      const skyRecords = () => Array.from({ length: 18 }, (_, i) => ({
+        id: 2000 + i,
+        type: 'coin',
+        lane: [-1, 0, 1][Math.floor(i / 6)],
+        z: 5 + (i % 6) * 7,
+        height: SURFBOARD_HEIGHT + .85,
+        sky: true,
+      }));
       const samples = [...document.querySelectorAll('canvas')].map((canvas, index) => {
+        const pose = poses[index] ?? null;
         const game = new Game({ random: () => .5 });
         game.state = 'playing';
         game.distance = 45;
         game.objects = [];
         game.powerups = { magnet: 0, shield: 0 };
-        game.dubRemaining = 0;
+        game.surfRemaining = 0;
         game.shieldGrace = 0;
         Object.assign(game.player, {
-          lane: 0, x: 0, jump: 0,
-          sliding: poses[index] !== null,
-          rollProgress: poses[index] ?? 0,
-          slideRemaining: poses[index] === null ? 0 : .85 * (1 - poses[index]),
+          lane: 0, x: 0, jump: 0, altitude: 0,
+          sliding: pose !== null,
+          rollProgress: pose ?? 0,
+          slideRemaining: pose === null ? 0 : .85 * (1 - pose),
         });
         if (index === 4) {
           game.powerups = { magnet: 8, shield: 10 };
-          game.dubRemaining = 8;
         }
         if (index === 5) {
           game.objects = [
             { id: 1001, type: 'powerup', power: 'magnet', lane: -1, z: 3.5 },
-            { id: 1002, type: 'powerup', power: 'shield', lane: 0, z: 7 },
-            { id: 1003, type: 'powerup', power: 'double', lane: 1, z: 5.2 },
+            { id: 1002, type: 'powerup', power: 'shield', lane: 1, z: 5.2 },
+            ...Array.from({ length: 5 }, (_, i) => ({ id: 1010 + i, type: 'coin', lane: 0, z: 9 + i * 5, height: .85 })),
           ];
+        }
+        if (index === 6) {
+          game.objects = [
+            { id: 1101, type: 'crate', lane: -1, z: 3.5 },
+            { id: 1102, type: 'buoy', lane: 0, z: 18 },
+            { id: 1103, type: 'cart', lane: 1, z: 5.2 },
+          ];
+        }
+        if (index >= 7) {
+          game.surfRemaining = 10;
+          game.player.altitude = SURFBOARD_HEIGHT;
+          game.objects = skyRecords();
+          if (index === 7) game.objects.push(
+            { id: 2101, type: 'tram', lane: -1, z: 13 },
+            { id: 2102, type: 'gate', lane: 0, z: 9 },
+            { id: 2103, type: 'cart', lane: 1, z: 5 },
+          );
         }
         const renderer = new Renderer(canvas);
         renderer.camera = 1;
+        renderer.flightCamera = game.player.altitude;
         renderer.reducedMotion = false;
-        return { game, renderer };
+        return { game, renderer, detail: index === 9 };
       });
       const renderAll = () => {
         try {
-          for (const { game, renderer } of samples) {
+          for (const { game, renderer, detail } of samples) {
             renderer.resize();
             renderer.camera = 1;
+            renderer.flightCamera = game.player.altitude;
+            renderer.time = 1;
             renderer.draw(game, 0, 1);
+            if (detail) {
+              const c = renderer.ctx;
+              const anchor = renderer.project(0, SURFBOARD_HEIGHT, 0);
+              c.fillStyle = '#d3e5d8';
+              c.fillRect(0, 0, renderer.width, renderer.height);
+              c.save();
+              c.translate(renderer.width / 2, renderer.height * .7);
+              c.scale(1.7, 1.7);
+              c.translate(-anchor.x, -anchor.y);
+              renderer.dolphin(game);
+              c.restore();
+            }
           }
           status.classList.remove('error');
-          status.textContent = '✓ All 6 snapshots rendered successfully.';
+          status.textContent = `✓ All ${samples.length} snapshots rendered successfully.`;
         } catch (error) { showError(error); }
       };
       renderAll();

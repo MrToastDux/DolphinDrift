@@ -1,4 +1,4 @@
-import { Game } from './game.js';
+import { Game, SURFBOARD_COST, SURFBOARD_SECONDS } from './game.js';
 import { Renderer } from './renderer.js';
 import { IslandAudio } from './audio.js';
 
@@ -20,16 +20,14 @@ let radioChosen = false;
 const powerupMessages = {
   magnet: 'Magnet on. Records come to you for 10s.',
   shield: 'Shield on. One hit covered for 12s.',
-  double: 'Double records. Sweet rewards for 10s.',
 };
 
 function syncPowerups() {
   const remaining = {
     magnet: game.powerups?.magnet || 0,
     shield: game.powerups?.shield || 0,
-    double: game.dubRemaining || 0,
   };
-  const names = { magnet: 'Record magnet', shield: 'One-hit shield', double: 'Double records' };
+  const names = { magnet: 'Record magnet', shield: 'One-hit shield' };
   let active = false;
   for (const [power, seconds] of Object.entries(remaining)) {
     const badge = $(`power-${power}`);
@@ -45,6 +43,26 @@ function syncPowerups() {
   }
   $('powerups').classList.toggle('hidden', !active);
   shell.classList.toggle('has-powerups', active);
+}
+
+function syncSurfboard() {
+  const riding = game.surfRemaining > 0;
+  const affordable = game.coins >= SURFBOARD_COST;
+  const button = $('surfboard');
+  button.disabled = game.state !== 'playing' || riding || !affordable;
+  $('surf-control').classList.toggle('riding', riding);
+  $('surf-control').classList.toggle('affordable', affordable && !riding);
+  $('surf-title').textContent = riding ? 'Cruising the sky' : 'Fly on a surfboard';
+  $('surf-price').textContent = riding ? `${Math.ceil(game.surfRemaining)}s` : `${SURFBOARD_COST} records`;
+  $('surf-hint').textContent = riding
+    ? 'Steer left / right for sky records'
+    : affordable ? `${SURFBOARD_SECONDS}s flight · Click or press B` : `${game.coins} / ${SURFBOARD_COST} records · ${SURFBOARD_SECONDS}s flight`;
+  const progress = riding ? game.surfRemaining / SURFBOARD_SECONDS : Math.min(1, game.coins / SURFBOARD_COST);
+  $('surf-progress').style.width = `${progress * 100}%`;
+  $('run-speed').textContent = `${game.speed.toFixed(1)} m/s`;
+  const label = riding ? `Surfboard flight: ${Math.ceil(game.surfRemaining)} seconds remaining`
+    : `Buy a ${SURFBOARD_SECONDS}-second surfboard flight for ${SURFBOARD_COST} records${affordable ? '' : `; ${SURFBOARD_COST - game.coins} more needed`}`;
+  if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
 }
 
 function message(text, seconds = 2.8) {
@@ -124,6 +142,11 @@ function syncState() {
 $('start').addEventListener('click', start);
 $('resume').addEventListener('click', () => game.state === 'paused' ? togglePause() : start());
 $('pause').addEventListener('click', togglePause);
+$('surfboard').addEventListener('click', () => {
+  game.buySurfboard();
+  syncSurfboard();
+  if (game.state === 'playing') $('world').focus({ preventScroll: true });
+});
 $('home').addEventListener('click', () => {
   clearTimeout(tutorialTimer);
   clearTimeout(messageTimer);
@@ -152,7 +175,7 @@ $('sound').addEventListener('click', async () => {
   if (game.state === 'playing') $('world').focus({ preventScroll: true });
 });
 
-const keyActions = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'jump', w: 'jump', W: 'jump', ' ': 'jump', ArrowDown: 'slide', s: 'slide', S: 'slide' };
+const keyActions = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'jump', w: 'jump', W: 'jump', ' ': 'jump', ArrowDown: 'slide', s: 'slide', S: 'slide', b: 'surfboard', B: 'surfboard' };
 document.addEventListener('keydown', event => {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
   if (event.key === 'Tab' && !$('overlay').classList.contains('hidden')) {
@@ -226,7 +249,8 @@ function frame(now) {
     for (const event of game.drainEvents()) {
       audio.effect(event.type);
       renderer.burst(event.type, game, event);
-      if (event.type === 'dub') message('Dub mode! Double the records. ♫', 3.2);
+      if (event.type === 'surfboard') message('Sky time. Steer left / right to collect records.', 3.2);
+      if (event.type === 'surfboard-end') message('Touching down. Watch the ground ahead.', 2.5);
       if (event.type === 'powerup') message(powerupMessages[event.power] || 'Good vibes, powered up.', 3.2);
       if (event.type === 'shield-break') message('Shield saved you. Keep that rhythm.', 2.7);
     }
@@ -234,11 +258,7 @@ function frame(now) {
     $('distance').textContent = Math.floor(game.distance).toLocaleString();
     $('coins').textContent = game.coins;
     $('best').textContent = best.toLocaleString();
-    const dub = game.dubRemaining > 0;
-    $('flow-meter').classList.toggle('dub-active', dub);
-    $('flow-title').textContent = dub ? 'DUB MODE · 2× RECORDS' : 'FIND YOUR RHYTHM';
-    $('flow-count').textContent = dub ? `${Math.ceil(game.dubRemaining)}s` : `${game.flow}/8`;
-    [...$('flow-bars').children].forEach((bar, i) => bar.classList.toggle('lit', dub ? i < Math.ceil(game.dubRemaining / 10 * 8) : i < game.flow));
+    syncSurfboard();
     syncPowerups();
     renderer.musicOn = audio.enabled;
     renderer.draw(game, dt, elapsed);
@@ -246,6 +266,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 syncState();
+syncSurfboard();
 requestAnimationFrame(frame);
 // An opt-in local inspection hook for browser smoke tests.
 if (new URLSearchParams(location.search).has('debug')) window.__drift = { game, renderer, audio };
