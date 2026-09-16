@@ -1,8 +1,10 @@
 const LANES = [-1, 0, 1];
-const START_SPEED = 12;
-const MAX_SPEED = 30;
-const SPEED_GAIN = 0.12;
+export const START_SPEED = 12;
+export const MAX_SPEED = 100;
+export const SPEED_GAIN = 0.18;
 const OBSTACLE_PRESSURE = 1.33;
+export const REVIVE_COST = 75;
+export const COMBO_SECONDS = 6;
 export const SURFBOARD_COST = 200;
 export const SURFBOARD_SECONDS = 20;
 export const SURFBOARD_HEIGHT = 4.2;
@@ -20,17 +22,44 @@ const POWERS = Object.keys(POWERUP_DURATIONS);
 const OBSTACLES = ['barrier', 'gate', 'tram', 'crate', 'buoy', 'cart'];
 const MAGNET_RANGE = 12;
 
+export function speedAtTime(seconds) {
+  return Math.min(MAX_SPEED, START_SPEED + Math.max(0, seconds) * SPEED_GAIN);
+}
+
+function seededRandom(seed) {
+  // Hash text too, so a calendar date makes a repeatable daily route.
+  let state = 2166136261;
+  for (const character of String(seed)) state = Math.imul(state ^ character.charCodeAt(0), 16777619);
+  return () => {
+    state = (state + 0x6D2B79F5) | 0;
+    let value = Math.imul(state ^ state >>> 15, state | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 /** Small, rendering-independent simulation. All distances are in metres. */
 export class Game {
-  constructor({ random = Math.random } = {}) {
-    this.random = random;
+  constructor({ random = Math.random, seed } = {}) {
+    this.seed = seed;
+    this._providedRandom = random;
     this.reset();
   }
 
   reset() {
+    this.random = this.seed === undefined ? this._providedRandom : seededRandom(this.seed);
+    // Flights must not consume the daily ground course's random choices.
+    this._skyRandomSource = this.seed === undefined ? this._providedRandom : seededRandom(`${this.seed}:sky`);
     this.state = 'ready';
     this.distance = 0;
     this.coins = 0;
+    this._score = 0;
+    this.combo = 0;
+    this.maxCombo = 0;
+    this.comboRemaining = 0;
+    this.stats = { records: 0, jumps: 0, rolls: 0, powerups: 0, nearMisses: 0, flights: 0, shieldsUsed: 0 };
+    this.usedRevive = false;
+    this.reviveGrace = 0;
     this.elapsedTime = 0;
     this.surfRemaining = 0;
     this.surfLandingGrace = 0;
@@ -82,6 +111,30 @@ export class Game {
     return true;
   }
 
+  get score() {
+    return Math.floor(this._score);
+  }
+
+  get multiplier() {
+    return Math.min(5, 1 + Math.floor(this.combo / 12));
+  }
+
+  revive() {
+    if (this.state !== 'over' || this.usedRevive || this.coins < REVIVE_COST) return false;
+    this.coins -= REVIVE_COST;
+    this.usedRevive = true;
+    this.reviveGrace = 2;
+    this.objects = this.objects.filter(object => !(OBSTACLES.includes(object.type)
+      && object.z >= 0 && object.z <= this.speed * 2));
+    Object.assign(this.player, {
+      jump: 0, springJump: false, sliding: false, slideRemaining: 0, rollProgress: 0,
+    });
+    this._jumpVelocity = 0;
+    this.state = 'playing';
+    this._events.push({ type: 'revive' });
+    return true;
+  }
+
   action(name) {
     if (this.state !== 'playing') return false;
     if (name === 'surfboard') return this.buySurfboard();
@@ -99,6 +152,7 @@ export class Game {
       this._jumpVelocity = p.springJump ? SPRING_JUMP_VELOCITY : JUMP_VELOCITY;
       // A tiny positive height distinguishes takeoff from standing still.
       p.jump = 0.0001;
+      this.stats.jumps += 1;
       this._events.push({ type: 'jump' });
       return true;
     }
@@ -106,6 +160,7 @@ export class Game {
       p.sliding = true;
       p.slideRemaining = SLIDE_SECONDS;
       p.rollProgress = 0;
+      this.stats.rolls += 1;
       this._events.push({ type: 'slide' });
       return true;
     }
@@ -116,6 +171,7 @@ export class Game {
     if (this.state !== 'playing' || this.coins < SURFBOARD_COST || this.surfRemaining > 0) return false;
     this.coins -= SURFBOARD_COST;
     this.surfRemaining = SURFBOARD_SECONDS;
+    this.stats.flights += 1;
     this.surfLandingGrace = 0;
     Object.assign(this.player, {
       altitude: SURFBOARD_HEIGHT, jump: 0, springJump: false, sliding: false,
@@ -152,6 +208,14 @@ export class Game {
       state: this.state,
       distance: this.distance,
       coins: this.coins,
+      score: this.score,
+      combo: this.combo,
+      maxCombo: this.maxCombo,
+      multiplier: this.multiplier,
+      comboRemaining: this.comboRemaining,
+      stats: { ...this.stats },
+      usedRevive: this.usedRevive,
+      reviveGrace: this.reviveGrace,
       elapsedTime: this.elapsedTime,
       surfRemaining: this.surfRemaining,
       surfLandingGrace: this.surfLandingGrace,
@@ -167,6 +231,12 @@ export class Game {
   _step(dt) {
     const p = this.player;
     this.elapsedTime += dt;
+    this.comboRemaining = Math.max(0, this.comboRemaining - dt);
+    if (this.comboRemaining < 1e-9) {
+      this.comboRemaining = 0;
+      this.combo = 0;
+    }
+    this.reviveGrace = Math.max(0, this.reviveGrace - dt);
     this.surfLandingGrace = Math.max(0, this.surfLandingGrace - dt);
     if (this.surfRemaining > 0) {
       this.surfRemaining = Math.max(0, this.surfRemaining - dt);
@@ -208,9 +278,10 @@ export class Game {
       }
     }
 
-    this.speed = Math.min(MAX_SPEED, START_SPEED + this.elapsedTime * SPEED_GAIN);
+    this.speed = speedAtTime(this.elapsedTime);
     const movement = this.speed * dt;
     this.distance += movement;
+    this._score += movement * this.multiplier;
     for (const object of this.objects) object.z -= movement;
     const crossesPlayer = object => !object._passed && object.z <= 0 && object.z + movement > 0;
 
@@ -220,11 +291,13 @@ export class Game {
       object._passed = true;
       if (this.surfRemaining > 0 || Math.abs(object.lane - p.x) >= 0.43 || !POWERS.includes(object.power)) continue;
       object.collected = true;
+      this.stats.powerups += 1;
       this.powerups[object.power] = POWERUP_DURATIONS[object.power];
       if (object.power === 'ghost') this.ghostGrace = 0;
       this._events.push({ type: 'powerup', power: object.power });
     }
 
+    const nearMisses = [];
     for (const object of this.objects) {
       if (object.type === 'powerup' || object._passed) continue;
       const reachableRecord = Boolean(object.sky) === (this.surfRemaining > 0);
@@ -245,8 +318,14 @@ export class Game {
       }
       // Neighbouring hazards overlap slightly so a lane change cannot squeeze
       // through a blocked pair. Coins retain their smaller collection radius.
-      if (laneDistance >= 0.55) continue;
-      const cleared = this.surfRemaining > 0 || this.surfLandingGrace > 0
+      if (laneDistance >= 0.55) {
+        if (laneDistance < 1.08 && OBSTACLES.includes(object.type) && !object.sky
+            && p.jump === 0 && p.altitude === 0 && this.surfRemaining === 0 && this.surfLandingGrace === 0
+            && this.powerups.ghost === 0 && this.ghostGrace === 0 && this.powerups.shield === 0
+            && this.shieldGrace === 0 && this.reviveGrace === 0) nearMisses.push(object);
+        continue;
+      }
+      const cleared = this.reviveGrace > 0 || this.surfRemaining > 0 || this.surfLandingGrace > 0
         || this.powerups.ghost > 0 || this.ghostGrace > 0
         || (['barrier', 'crate', 'buoy'].includes(object.type) && p.jump >= 0.85)
         || (['tram', 'cart'].includes(object.type) && p.springJump && p.jump >= 2.3)
@@ -259,6 +338,7 @@ export class Game {
         if (this.powerups.shield > 0) {
           this.powerups.shield = 0;
           this.shieldGrace = 1;
+          this.stats.shieldsUsed += 1;
           this._events.push({ type: 'shield-break' });
           continue;
         }
@@ -269,6 +349,12 @@ export class Game {
     }
     this.objects = this.objects.filter(object => object.z > -10 && !object.collected);
     if (this.state === 'playing') {
+      for (const object of nearMisses) {
+        const bonus = 50 * this.multiplier;
+        this._score += bonus;
+        this.stats.nearMisses += 1;
+        this._events.push({ type: 'near-miss', id: object.id, bonus });
+      }
       this._fillTrack();
       if (this.surfRemaining > 0) this._fillSky();
     }
@@ -278,6 +364,11 @@ export class Game {
     object.collected = true;
     object._passed = true;
     this.coins += 1;
+    this.stats.records += 1;
+    this.combo += 1;
+    this.maxCombo = Math.max(this.maxCombo, this.combo);
+    this.comboRemaining = COMBO_SECONDS;
+    this._score += 10 * this.multiplier;
     const event = { type: 'coin', id: object.id };
     if (magnetic) {
       event.magnetic = true;
@@ -286,9 +377,9 @@ export class Game {
     this._events.push(event);
   }
 
-  _random() {
+  _random(source = this.random) {
     // Injected sources are clamped so even endpoint values produce valid lanes.
-    const value = this.random();
+    const value = source();
     return Number.isFinite(value) ? Math.min(0.999999, Math.max(0, value)) : 0.5;
   }
 
@@ -331,7 +422,7 @@ export class Game {
     const accelerating = Math.min(seconds, (MAX_SPEED - this.speed) / SPEED_GAIN);
     const flightEnd = this.distance + this.speed * accelerating
       + SPEED_GAIN * accelerating * accelerating / 2 + MAX_SPEED * (seconds - accelerating);
-    const horizon = Math.min(this.distance + LOOK_AHEAD, flightEnd);
+    const horizon = Math.min(this.distance + Math.max(LOOK_AHEAD, this.speed * 6), flightEnd);
     while (this._nextSky < horizon && this._skyRecordCount < SURFBOARD_RECORD_LIMIT) {
       const arrivalSpeed = Math.min(MAX_SPEED,
         Math.sqrt(this.speed * this.speed + 2 * SPEED_GAIN * (this._nextSky - this.distance)));
@@ -344,7 +435,7 @@ export class Game {
       }
       // Every turn is one lane; leave a visible gap after each six-record run.
       this._nextSky += Math.max(12, arrivalSpeed * 0.9);
-      this._skyLane = this._skyLane === 0 ? (this._random() < 0.5 ? -1 : 1) : 0;
+      this._skyLane = this._skyLane === 0 ? (this._random(this._skyRandomSource) < 0.5 ? -1 : 1) : 0;
     }
   }
 }

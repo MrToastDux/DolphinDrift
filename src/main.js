@@ -1,20 +1,113 @@
-import { Game, SURFBOARD_COST, SURFBOARD_SECONDS, POWERUP_DURATIONS } from './game.js';
-import { Renderer } from './renderer.js';
+import { Game, SURFBOARD_COST, SURFBOARD_SECONDS, POWERUP_DURATIONS, REVIVE_COST } from './game.js';
+import { Renderer, getDistrict } from './renderer.js';
 import { IslandAudio } from './audio.js';
+import { createProfile, finishRun, getMissions, ACHIEVEMENTS, dailySeed, localDateKey } from './progression.js';
 
 const $ = id => document.getElementById(id);
 const game = new Game();
 const renderer = new Renderer($('world'));
 const audio = new IslandAudio();
 const shell = $('game-shell');
+const debug = new URLSearchParams(location.search).has('debug');
+let profile = createProfile();
+let storedSettings = false;
+try {
+  if (!debug) {
+    const stored = JSON.parse(localStorage.getItem('dolphin-drift-profile') || 'null');
+    if (stored) { profile = createProfile(stored); storedSettings = Boolean(stored.settings); }
+  }
+} catch { /* Corrupt or disabled storage must never block a run. */ }
+if (!storedSettings) profile.settings.reducedMotion = renderer.reducedMotion;
+renderer.reducedMotion = profile.settings.reducedMotion;
+document.documentElement.classList.toggle('less-motion', renderer.reducedMotion);
+let runBaseline = createProfile(profile);
+let runSaved = false;
+let mode = 'endless';
+let runDate = localDateKey();
+let runMode = mode;
 let best = 0;
-try { best = Math.max(0, Number(localStorage.getItem('dolphin-drift-best')) || 0); } catch { /* Play works without storage. */ }
+try {
+  const legacyBest = debug ? 0 : Number(localStorage.getItem('dolphin-drift-best'));
+  best = Math.floor(Math.max(profile.bestDistance, Number.isFinite(legacyBest) ? Math.max(0, legacyBest) : 0));
+} catch { /* Play works without storage. */ }
 let lastState = '';
 let previousTime = performance.now();
 let elapsed = 0;
 let savedFocus = null;
 let audioWanted = false;
-let radioChosen = false;
+let radioChosen = profile.settings.muted;
+function saveProfile() {
+  if (debug) return;
+  try { localStorage.setItem('dolphin-drift-profile', JSON.stringify(profile)); } catch { /* Session remains playable. */ }
+}
+
+function saveRun() {
+  if (runSaved || game.elapsedTime <= 0) return;
+  const settings = { ...profile.settings };
+  profile = finishRun(runBaseline, game, { date: runDate, daily: runMode === 'daily' });
+  profile.settings = settings;
+  runSaved = true;
+  best = Math.max(best, Math.floor(profile.bestDistance));
+  saveProfile();
+}
+
+function syncMode() {
+  $('mode-endless').setAttribute('aria-pressed', String(mode === 'endless'));
+  $('mode-daily').setAttribute('aria-pressed', String(mode === 'daily'));
+  const date = localDateKey();
+  const dailyBest = profile.daily.date === date ? profile.daily.bestScore : 0;
+  $('mode-note').textContent = mode === 'daily'
+    ? `${date} · Same seed all day · Best ${dailyBest.toLocaleString()} pts`
+    : 'A fresh route. A little faster every second.';
+}
+
+function syncMissions() {
+  $('mission-list').replaceChildren(...getMissions(game).map(mission => {
+    const row = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${mission.complete ? '✓' : '○'} ${mission.title}`;
+    const value = document.createElement('strong');
+    value.textContent = `${Math.min(mission.target, Math.floor(mission.current))} / ${mission.target}`;
+    row.classList.toggle('complete', mission.complete);
+    row.append(label, value);
+    return row;
+  }));
+}
+
+function syncLogbook() {
+  $('career-stats').replaceChildren(...[
+    [profile.runs, 'RUNS'], [profile.bestScore, 'BEST SCORE'],
+    [profile.totalRecords, 'RECORDS FOUND'], [profile.bestCombo, 'BEST STREAK'],
+  ].map(([value, label]) => {
+    const cell = document.createElement('div');
+    const number = document.createElement('strong'); number.textContent = value.toLocaleString();
+    const caption = document.createElement('span'); caption.textContent = label;
+    cell.append(number, caption); return cell;
+  }));
+  $('achievements').replaceChildren(...ACHIEVEMENTS.map(achievement => {
+    const row = document.createElement('div');
+    const unlocked = profile.achievements.includes(achievement.id);
+    row.className = `achievement${unlocked ? ' earned' : ''}`;
+    const title = document.createElement('strong'); title.textContent = `${unlocked ? '✓' : '○'} ${achievement.title}`;
+    const description = document.createElement('span'); description.textContent = achievement.description;
+    row.append(title, description); return row;
+  }));
+  $('reduced-motion').checked = renderer.reducedMotion;
+}
+
+function syncRunHud() {
+  $('score').textContent = game.score.toLocaleString();
+  $('speed-value').textContent = game.speed.toFixed(1);
+  $('multiplier').textContent = `×${game.multiplier}`;
+  $('combo-label').textContent = game.combo ? `${game.combo} record streak` : 'find your flow';
+  $('flow-progress').style.width = `${game.comboRemaining / 6 * 100}%`;
+  $('flow-meter').setAttribute('aria-valuenow', game.comboRemaining.toFixed(1));
+  const district = getDistrict(game.distance);
+  $('district-name').textContent = `${runMode === 'daily' ? 'DAILY / ' : ''}${district.name.toUpperCase()}`;
+  $('best-chase').textContent = best > 0
+    ? game.distance > best ? 'Beyond your best' : `${Math.ceil(best - game.distance).toLocaleString()} m to your best`
+    : 'Make your first mark';
+}
 function syncPowerups() {
   const names = { magnet: 'Magnet', shield: 'Shield', ghost: 'Ghost', spring: 'Super jump' };
   let active = false;
@@ -59,6 +152,13 @@ function syncSurfboard() {
 }
 
 function start() {
+  if (game.state === 'playing') return;
+  if (game.state !== 'ready') saveRun();
+  runBaseline = createProfile(profile);
+  runSaved = false;
+  runDate = localDateKey();
+  runMode = mode;
+  game.seed = mode === 'daily' ? dailySeed(runDate) : undefined;
   $('start').blur();
   game.start();
   if (!radioChosen) {
@@ -70,6 +170,7 @@ function start() {
     });
   }
   renderer.particles = [];
+  renderer.flyingRecords = [];
   syncState();
   $('world').focus({ preventScroll: true });
 }
@@ -98,18 +199,27 @@ function syncState() {
   if (isOverlay) {
     savedFocus = document.activeElement;
     const over = game.state === 'over';
+    const previousBest = best;
+    if (over) saveRun();
     $('modal-eyebrow').textContent = over ? 'EVERY DRIFT IS A GOOD DRIFT' : 'TAKE A BREATHER';
     $('modal-title').textContent = over ? 'Another wave awaits.' : 'On island time.';
     $('modal-description').textContent = over ? 'A little bump. Still a whole lot of good vibes.' : 'Your next good wave can wait.';
     $('results').classList.toggle('hidden', !over);
     $('result-distance').textContent = Math.floor(game.distance).toLocaleString();
     $('result-coins').textContent = game.coins;
+    $('run-summary').classList.toggle('hidden', !over);
+    $('run-summary').textContent = `${game.score.toLocaleString()} points · ${game.maxCombo} best streak · ${game.stats.nearMisses} close dodges`;
+    syncMissions();
+    const fresh = over ? ACHIEVEMENTS.filter(item => profile.achievements.includes(item.id) && !runBaseline.achievements.includes(item.id)) : [];
+    $('unlocked').textContent = fresh.length ? `Unlocked: ${fresh.map(item => item.title).join(' · ')}` : '';
+    $('unlocked').classList.toggle('hidden', !fresh.length);
+    $('revive').classList.toggle('hidden', !over || game.usedRevive || game.coins < REVIVE_COST);
     $('resume').innerHTML = `${over ? 'Drift again' : 'Keep drifting'} <span aria-hidden="true">↗</span>`;
     $('resume').focus({ preventScroll: true });
-    if (over && Math.floor(game.distance) > best) {
+    if (over && Math.floor(game.distance) > previousBest) {
       best = Math.floor(game.distance);
       $('modal-eyebrow').textContent = 'A FRESH PERSONAL BEST';
-      try { localStorage.setItem('dolphin-drift-best', String(best)); } catch { /* Storage may be unavailable. */ }
+      if (!debug) try { localStorage.setItem('dolphin-drift-best', String(best)); } catch { /* Storage may be unavailable. */ }
     }
   } else if (before === 'paused' || before === 'over') {
     if (game.state === 'ready') $('start').focus({ preventScroll: true });
@@ -127,10 +237,44 @@ $('surfboard').addEventListener('click', () => {
   if (game.state === 'playing') $('world').focus({ preventScroll: true });
 });
 $('home').addEventListener('click', () => {
+  saveRun();
   game.reset();
   renderer.particles = [];
   syncState();
+  syncMode();
 });
+
+$('revive').addEventListener('click', () => {
+  if (!game.revive()) return;
+  // Keep the crash checkpoint saved. The next finish is recalculated from the
+  // original run baseline, so a continued run never counts twice.
+  runSaved = false;
+  syncState();
+  $('world').focus({ preventScroll: true });
+});
+for (const name of ['endless', 'daily']) $('mode-' + name).addEventListener('click', () => { mode = name; syncMode(); });
+$('logbook-open').addEventListener('click', () => {
+  if (game.state === 'playing') togglePause();
+  syncLogbook();
+  $('logbook').showModal();
+});
+$('logbook-close').addEventListener('click', () => $('logbook').close());
+$('reduced-motion').addEventListener('change', () => {
+  renderer.reducedMotion = $('reduced-motion').checked;
+  profile.settings.reducedMotion = renderer.reducedMotion;
+  document.documentElement.classList.toggle('less-motion', renderer.reducedMotion);
+  renderer.particles = [];
+  renderer.flyingRecords = [];
+  saveProfile();
+});
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+  } catch { /* Browsers may disallow full screen in an embedded view. */ }
+}
+$('fullscreen').addEventListener('click', toggleFullscreen);
+$('fullscreen').hidden = !document.fullscreenEnabled;
 
 function syncRadio() {
   $('sound').setAttribute('aria-pressed', String(audio.enabled));
@@ -141,6 +285,8 @@ function syncRadio() {
 $('sound').addEventListener('click', async () => {
   radioChosen = true;
   audioWanted = !audioWanted;
+  profile.settings.muted = !audioWanted;
+  saveProfile();
   if (audioWanted) {
     const enabled = await audio.enable();
     if (!enabled) audioWanted = false;
@@ -152,9 +298,12 @@ $('sound').addEventListener('click', async () => {
 const keyActions = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'jump', w: 'jump', W: 'jump', ' ': 'jump', ArrowDown: 'slide', s: 'slide', S: 'slide', b: 'surfboard', B: 'surfboard' };
 document.addEventListener('keydown', event => {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if ($('logbook').open) return;
+  if (event.key.toLowerCase() === 'f') { event.preventDefault(); if (!event.repeat) toggleFullscreen(); return; }
+  if (event.key.toLowerCase() === 'r' && game.state === 'over') { event.preventDefault(); if (!event.repeat) start(); return; }
   if (event.key === 'Tab' && !$('overlay').classList.contains('hidden')) {
-    const focusable = [$('resume'), $('home')];
-    const first = focusable[0], last = focusable[1];
+    const focusable = [$('revive'), $('resume'), $('home')].filter(button => !button.classList.contains('hidden'));
+    const first = focusable[0], last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     return;
@@ -219,6 +368,7 @@ function frame(now) {
     $('distance').textContent = Math.floor(game.distance).toLocaleString();
     $('coins').textContent = game.coins;
     $('best').textContent = best.toLocaleString();
+    syncRunHud();
     syncSurfboard();
     syncPowerups();
     renderer.musicOn = audio.enabled;
@@ -228,6 +378,8 @@ function frame(now) {
 }
 syncState();
 syncSurfboard();
+syncMode();
+syncRadio();
 requestAnimationFrame(frame);
 // An opt-in local inspection hook for browser smoke tests.
-if (new URLSearchParams(location.search).has('debug')) window.__drift = { game, renderer, audio };
+if (debug) window.__drift = { game, renderer, audio, get profile() { return profile; } };

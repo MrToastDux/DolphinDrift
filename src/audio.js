@@ -336,6 +336,13 @@ export class IslandAudio {
           pan: index % 2 ? .22 : -.22, fx: true, echo: true,
         });
       });
+    } else if (name === 'near-miss') {
+      this.noise(now, .1, .025, 2400, 'bandpass', true);
+      this.tone(740, now + .025, .15, .04, { endFrequency: 990, fx: true });
+    } else if (name === 'revive') {
+      [330, 440, 660, 880].forEach((frequency, index) => {
+        this.tone(frequency, now + index * .075, .3, .065, { fx: true, echo: true });
+      });
     } else if (name === 'surfboard-end') {
       this.tone(660, now, .45, .065, { endFrequency: 330, fx: true, echo: true });
     }

@@ -26,7 +26,7 @@
   <header>
     <h1>Dolphin Drift · Render gallery</h1>
     <p>Fixed gameplay poses · settled cameras · dt 0 · time 1 · no simulation updates or audio</p>
-    <output id="status" role="status">Preparing twelve snapshots…</output>
+    <output id="status" role="status">Preparing sixteen snapshots…</output>
   </header>
   <main class="gallery">
     <figure><figcaption>01 · Forward walk<small>Neutral powerups; normal walking gait</small></figcaption><canvas aria-label="Dolphin walking forward"></canvas></figure>
@@ -41,6 +41,10 @@
     <figure><figcaption>10 · Flight pose detail<small>Enlarged dolphin, surfboard, and smoke at a fixed time</small></figcaption><canvas aria-label="Close view of the dolphin reclining on his back and smoking on the surfboard"></canvas></figure>
     <figure><figcaption>11 · Ghost power<small>Translucent dolphin · lavender glow</small></figcaption><canvas aria-label="Translucent dolphin with the ghost power active"></canvas></figure>
     <figure><figcaption>12 · Spring shoes<small>Blue shoes · boosted jump · short motion strokes</small></figcaption><canvas aria-label="Dolphin making a boosted jump with blue spring shoes"></canvas></figure>
+    <figure><figcaption>13 · Sunset Market<small>900 m · warm evening palette · roadside stalls and lanterns</small></figcaption><canvas aria-label="Sunset Market district with fruit stalls, lanterns, and track obstacles"></canvas></figure>
+    <figure><figcaption>14 · Neon Harbour<small>1,650 m · stars, sailboats, dock cranes, and illuminated track lights</small></figcaption><canvas aria-label="Neon Harbour district with stars, boats, and glowing track lights"></canvas></figure>
+    <figure><figcaption>15 · High-speed run<small>38 m/s · subtle peripheral wind trails · clear view of all three lanes</small></figcaption><canvas aria-label="High-speed run with wind trails along the edges of the canvas"></canvas></figure>
+    <figure class="narrow"><figcaption>16 · Harbour on a narrow screen<small>300 × 480 canvas · district scenery and readable ground hazards</small></figcaption><canvas aria-label="Narrow portrait view of Neon Harbour with ground obstacles and records"></canvas></figure>
   </main>
   <script type="module">
     const status = document.getElementById('status');
@@ -113,6 +117,17 @@
         if (index === 11) {
           game.powerups.spring = POWERUP_DURATIONS.spring;
           game.player.jump = 2.3;
+        }
+        if (index >= 12) {
+          game.distance = index === 12 ? 900 : index === 14 ? 1900 : 1650;
+          game.speed = index === 14 ? 38 : 18;
+          game.objects = [
+            { id: 3001, type: 'barrier', lane: -1, z: 9 },
+            { id: 3002, type: 'gate', lane: 1, z: 17 },
+            { id: 3003, type: 'tram', lane: -1, z: 42 },
+            { id: 3004, type: 'powerup', power: 'magnet', lane: 0, z: 28 },
+            ...Array.from({ length: 8 }, (_, i) => ({ id: 3010 + i, type: 'coin', lane: 0, z: 5 + i * 5, height: .85 })),
+          ];
         }
         const renderer = new Renderer(canvas);
         renderer.camera = 1;

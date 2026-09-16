@@ -15,6 +15,7 @@
       <a class="brand" href="./" aria-label="Dolphin Drift home"><svg viewBox="0 0 42 42" fill="none" aria-hidden="true"><path d="M4 26C8 12 21 9 28 18l9 1 2 5-13 1c-3 8-10 10-16 5l-6 7 1-11Z" fill="currentColor"/><path d="m16 14 3-9 7 9" fill="currentColor"/><circle cx="29" cy="21" r="1.4" fill="#f5f6ef"/></svg><span>dolphin<span class="brand-light">drift</span></span></a>
       <div class="location"><span class="status-dot"></span> NEO KINGSTON <span class="location-year">/ 2086</span></div>
       <div class="top-actions">
+        <button class="utility-button" id="logbook-open" aria-haspopup="dialog" title="Missions, achievements and settings">Logbook</button>
         <button class="sound-button" id="sound" aria-label="Turn on island radio" aria-pressed="false"><span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="sound-label">Sound off</span></button>
         <button class="icon-button" id="pause" aria-label="Pause game" disabled><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></button>
       </div>
@@ -29,12 +30,21 @@
         <div class="stat distance-stat"><span class="stat-label">DISTANCE</span><span class="stat-value"><span id="distance">0</span><small>m</small></span></div>
         <div class="stat"><span class="stat-label">RECORDS</span><span class="stat-value"><span class="record-icon" aria-hidden="true"></span><span id="coins">0</span></span></div>
         <div class="stat best-stat"><span class="stat-label">BEST RUN</span><span class="stat-value"><span id="best">0</span><small>m</small></span></div>
+        <div class="stat score-stat"><span class="stat-label">SCORE</span><span class="stat-value" id="score">0</span></div>
+      </div>
+      <div class="run-telemetry" aria-label="Speed and combo">
+        <span class="district-name" id="district-name">THE PALM LINE</span>
+        <div><strong id="speed-value">12.0</strong><span>m/s</span><span class="telemetry-divider">/</span><strong id="multiplier">×1</strong><span id="combo-label">find your flow</span></div>
+        <div class="flow-track" role="progressbar" id="flow-meter" aria-label="Record combo time remaining" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0"><i id="flow-progress"></i></div>
+        <span id="best-chase">A fresh start</span>
       </div>
 
       <section class="intro" id="intro" aria-labelledby="intro-title">
         <div class="eyebrow"><span></span> A LITTLE ISLAND ESCAPE</div>
         <h1 id="intro-title">Less rush.<br>More <em>drift.</em></h1>
         <p>A dolphin. A fresh pair of kicks.<br>One sweet reggae rhythm. Endless good vibrations.</p>
+        <div class="mode-picker" role="group" aria-label="Run mode"><button id="mode-endless" aria-pressed="true">Endless</button><button id="mode-daily" aria-pressed="false">Daily route</button></div>
+        <span class="mode-note" id="mode-note">A fresh route. A little faster every second.</span>
         <button class="start-button" id="start">Let’s drift <span aria-hidden="true">↗</span></button>
         <span class="start-hint">or press <kbd>SPACE</kbd> to find your flow</span>
         <div class="intro-bottom"><span class="jamaica-flag" aria-label="Jamaican flag"></span><span>ISLAND SOUL. FUTURE FEET.</span></div>
@@ -77,6 +87,10 @@
           <h2 id="modal-title">On island time.</h2>
           <p id="modal-description">Your next good wave can wait.</p>
           <div class="results hidden" id="results"><div><strong id="result-distance">0</strong><span>METERS DRIFTED</span></div><div><strong id="result-coins">0</strong><span>RECORDS IN HAND</span></div></div>
+          <div id="run-summary" class="run-summary hidden"></div>
+          <ul id="mission-list" class="mission-list" aria-label="This run's missions"></ul>
+          <p id="unlocked" class="unlocked hidden" role="status"></p>
+          <button class="revive-button hidden" id="revive">Catch one more wave · 75 records</button>
           <button class="start-button" id="resume">Keep drifting <span aria-hidden="true">↗</span></button>
           <button class="text-button" id="home">Back to the island</button>
         </section>
@@ -89,6 +103,14 @@
       <div class="controls"><span><kbd>←</kbd><kbd>→</kbd> switch lanes</span><span><kbd>↑</kbd> jump</span><span><kbd>↓</kbd> roll</span><span><kbd>B</kbd> surfboard</span><span class="pause-control"><kbd>ESC</kbd> pause</span></div>
       <span class="footer-signoff">Made of sunshine <span aria-hidden="true">☀</span></span>
     </footer>
+    <dialog id="logbook" class="logbook" aria-labelledby="logbook-title">
+      <div class="logbook-heading"><div><span class="eyebrow">YOUR ISLAND STORY</span><h2 id="logbook-title">The logbook.</h2></div><button id="logbook-close" class="icon-button" aria-label="Close logbook">×</button></div>
+      <div id="career-stats" class="career-stats"></div>
+      <h3>Little milestones</h3><div id="achievements" class="achievements"></div>
+      <div class="preferences"><label><input type="checkbox" id="reduced-motion"> Less motion & effects</label><button id="fullscreen" class="utility-button">Full screen ↗</button></div>
+      <p class="logbook-help">Keep collecting within 6 seconds to build a combo. Every 12 records raises your score multiplier, up to ×5. Close dodges earn bonus points. Records still spend one for one.</p>
+      <p class="logbook-help">Arrows / WASD to steer, jump and roll · B for flight · P to pause · R to retry after a crash · F for full screen. Daily routes use the same track seed for your local date. Progress stays in this browser.</p>
+    </dialog>
   </div>
   <script type="module" src="src/main.js"></script>
 </body>

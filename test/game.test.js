@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, SURFBOARD_COST, SURFBOARD_SECONDS, SURFBOARD_HEIGHT, POWERUP_DURATIONS } from '../src/game.js';
+import {
+  Game, SURFBOARD_COST, SURFBOARD_SECONDS, SURFBOARD_HEIGHT, POWERUP_DURATIONS,
+  START_SPEED, MAX_SPEED, SPEED_GAIN, REVIVE_COST, COMBO_SECONDS, speedAtTime,
+} from '../src/game.js';
 
 const HAZARDS = ['barrier', 'gate', 'tram', 'crate', 'buoy', 'cart'];
 
@@ -183,7 +186,7 @@ test('long frames are capped, invalid deltas are ignored, and crossing cannot tu
   assert.equal(game.state, 'over');
 });
 
-test('records always count once, without a streak multiplier or double power-up', () => {
+test('records always count as one spendable record, even during a combo', () => {
   const game = emptyGame();
   for (let id = 0; id < 24; id += 1) {
     game.objects = [{ id, type: 'coin', lane: 0, z: 0.1 }];
@@ -512,7 +515,7 @@ test('flying cannot collect ground power-ups', () => {
 });
 
 test('sky trails are immediately visible, continue ahead, and form reachable finite routes at every speed', () => {
-  for (const elapsedTime of [0, 75, 150]) {
+  for (const elapsedTime of [0, 75, 180]) {
     const game = emptyGame();
     game.elapsedTime = elapsedTime;
     game.update(1 / 120);
@@ -567,19 +570,19 @@ test('speed rises with playing time, reaches a cap, and freezes or resets with t
   game._nextRow = 100000;
   advance(game, 10);
   assert.ok(Math.abs(game.elapsedTime - 10) < 1e-8);
-  assert.ok(Math.abs(game.speed - 13.2) < 1e-8);
+  assert.ok(Math.abs(game.speed - (START_SPEED + SPEED_GAIN * 10)) < 1e-8);
   game.distance += 1000;
   game.update(1 / 120);
-  assert.ok(game.speed < 13.21, 'speed is tied to playing time, not distance');
+  assert.ok(game.speed < 13.81, 'speed is tied to playing time, not distance');
   game.pause();
   const paused = game.snapshot();
   advance(game, 10);
   assert.deepEqual(game.snapshot(), paused);
   game.resume();
-  advance(game, 150);
-  assert.equal(game.speed, 30);
+  advance(game, 180);
+  assert.equal(game.speed, MAX_SPEED);
   game.reset();
-  assert.equal(game.speed, 12);
+  assert.equal(game.speed, START_SPEED);
   assert.equal(game.elapsedTime, 0);
 });
 
@@ -589,8 +592,8 @@ test('track generates all new obstacle types and keeps reaction gaps at top spee
     const game = new Game({ random: () => random });
     for (const object of game.objects) if (HAZARDS.includes(object.type)) seen.add(object.type);
     game.objects = [];
-    game.speed = 30;
-    game.elapsedTime = 150;
+    game.speed = MAX_SPEED;
+    game.elapsedTime = 180;
     game.distance = 4000;
     game._nextRow = game.distance + 40;
     game._fillTrack();
@@ -601,7 +604,7 @@ test('track generates all new obstacle types and keeps reaction gaps at top spee
       rows.set(object.z, lanes);
     }
     const positions = [...rows.keys()].sort((a, b) => a - b);
-    for (let i = 1; i < positions.length; i += 1) assert.ok(positions[i] - positions[i - 1] >= 30 * 1.25);
+    for (let i = 1; i < positions.length; i += 1) assert.ok(positions[i] - positions[i - 1] >= MAX_SPEED * 1.25);
     for (const lanes of rows.values()) assert.ok(lanes.size <= 2);
   }
   assert.deepEqual([...seen].sort(), [...HAZARDS].sort());
@@ -683,7 +686,7 @@ test('spring jumps rise higher and clear trams or carts only with enough height'
 });
 
 test('super jumps clear green hurdles on ascent and descent at every running speed', () => {
-  for (const elapsedTime of [0, 75, 150]) {
+  for (const elapsedTime of [0, 75, 180]) {
     for (const contactTime of [0.4, 0.95]) {
       for (const [frameTime, shield] of [[1 / 60, 0], [0.1, 0], [1 / 60, 12], [0.1, 12]]) {
         const game = emptyGame();
@@ -725,7 +728,7 @@ test('harder runs contain 33% more obstacles on average with clear lanes and the
     };
     const game = new Game({ random });
     game.elapsedTime = elapsedTime;
-    game.speed = Math.min(30, 12 + elapsedTime * 0.12);
+    game.speed = speedAtTime(elapsedTime);
     game.objects = [];
     game._rowCount = 0;
     game._nextRow = 100;
@@ -794,4 +797,225 @@ test('spring still respects sky record access and surfboard takeoff clears the c
   assert.equal(game.player.jump, 0);
   assert.equal(game.player.altitude, SURFBOARD_HEIGHT);
   assert.equal(game.action('jump'), false);
+});
+
+test('record combos boost earned score without multiplying currency, and cap at five', () => {
+  const game = emptyGame();
+  let expectedBonus = 0;
+  for (let record = 1; record <= 60; record += 1) {
+    game.objects = [{ id: record, type: 'coin', lane: 0, z: 0.01 }];
+    game.update(1 / 120);
+    const multiplier = Math.min(5, 1 + Math.floor(record / 12));
+    expectedBonus += 10 * multiplier;
+    assert.equal(game.combo, record);
+    assert.equal(game.maxCombo, record);
+    assert.equal(game.multiplier, multiplier);
+    assert.equal(game.comboRemaining, COMBO_SECONDS);
+    assert.equal(game.coins, record);
+    assert.equal(game.stats.records, record);
+  }
+  assert.ok(game.score >= expectedBonus);
+  assert.ok(Number.isInteger(game.score));
+  const score = game.score, distance = game.distance;
+  advance(game, 0.5);
+  assert.ok(Math.abs(game.score - score - (game.distance - distance) * 5) < 1);
+  assert.equal(game.drainEvents().filter(event => event.type === 'coin').length, 60);
+});
+
+test('combo timeout uses active time and resets its multiplier while preserving best streak', () => {
+  const game = emptyGame();
+  game.objects = Array.from({ length: 24 }, (_, id) => ({ id, type: 'coin', lane: 0, z: 0.01 }));
+  game.update(1 / 120);
+  advance(game, 5.9);
+  assert.equal(game.combo, 24);
+  assert.equal(game.multiplier, 3);
+  game.pause();
+  const paused = game.snapshot();
+  advance(game, 10);
+  assert.deepEqual(game.snapshot(), paused);
+  game.resume();
+  advance(game, 0.1);
+  assert.equal(game.comboRemaining, 0);
+  assert.equal(game.combo, 0);
+  assert.equal(game.multiplier, 1);
+  assert.equal(game.maxCombo, 24);
+  game.objects = [{ id: 30, type: 'coin', lane: 0, z: 0.01 }];
+  game.update(1 / 120);
+  assert.equal(game.combo, 1);
+  assert.equal(game.maxCombo, 24);
+  game.reset();
+  assert.equal(game.score, 0);
+  assert.equal(game.combo, 0);
+  assert.equal(game.comboRemaining, 0);
+  assert.equal(game.maxCombo, 0);
+});
+
+test('grounded unprotected near misses award a single bonus within the narrow adjacent band', () => {
+  for (const lane of [0.54, 0.55, 1, 1.079, 1.08, 2]) {
+    const game = emptyGame();
+    game.objects = [{ id: 1, type: 'tram', lane, z: 0.01 }];
+    game.update(1 / 120);
+    const expected = lane >= 0.55 && lane < 1.08;
+    assert.equal(game.stats.nearMisses, expected ? 1 : 0, `lane distance ${lane}`);
+    assert.equal(game.score, expected ? 50 : 0);
+    const events = game.drainEvents().filter(event => event.type === 'near-miss');
+    assert.deepEqual(events, expected ? [{ type: 'near-miss', id: 1, bonus: 50 }] : []);
+    advance(game, 1);
+    assert.equal(game.stats.nearMisses, expected ? 1 : 0);
+  }
+  const game = emptyGame();
+  game.combo = 24;
+  game.comboRemaining = 6;
+  game.objects = [{ id: 1, type: 'cart', lane: 1, z: 0.01 }];
+  game.update(1 / 120);
+  assert.equal(game.score, 150);
+  assert.equal(game.drainEvents()[0].bonus, 150);
+});
+
+test('jumping, protected passes and a simultaneous crash cannot farm near-miss points', () => {
+  for (const protect of [
+    game => game.action('jump'),
+    game => { game.powerups.shield = 1; },
+    game => { game.powerups.ghost = 1; },
+    game => { game.shieldGrace = 1; },
+    game => { game.ghostGrace = 1; },
+    game => { game.surfLandingGrace = 1; },
+    game => { game.reviveGrace = 1; },
+    game => { game.coins = SURFBOARD_COST; game.buySurfboard(); },
+  ]) {
+    const game = emptyGame();
+    protect(game);
+    game.objects = [{ id: 1, type: 'tram', lane: 1, z: 0.01 }];
+    game.update(1 / 120);
+    assert.equal(game.stats.nearMisses, 0);
+    assert.equal(game.drainEvents().some(event => event.type === 'near-miss'), false);
+  }
+  const game = emptyGame();
+  game.objects = [
+    { id: 1, type: 'tram', lane: 1, z: 0.01 },
+    { id: 2, type: 'tram', lane: 0, z: 0.01 },
+  ];
+  game.update(1 / 120);
+  assert.equal(game.state, 'over');
+  assert.equal(game.stats.nearMisses, 0);
+});
+
+test('revive costs 75 run records once, preserves progress and clears only nearby hazards', () => {
+  const game = emptyGame();
+  game.coins = REVIVE_COST;
+  assert.equal(game.revive(), false, 'a running game cannot revive');
+  game.elapsedTime = 100;
+  game.objects = [{ id: 1, type: 'tram', lane: 0, z: 0.01 }];
+  game.update(1 / 120);
+  assert.equal(game.state, 'over');
+  game.coins = REVIVE_COST - 1;
+  const unaffordable = game.snapshot();
+  assert.equal(game.revive(), false);
+  assert.deepEqual(game.snapshot(), unaffordable);
+  game.coins = REVIVE_COST + 5;
+  const speed = game.speed, score = game.score, elapsed = game.elapsedTime, distance = game.distance;
+  game.objects = [
+    { id: 1, type: 'tram', lane: 0, z: -1 },
+    { id: 2, type: 'gate', lane: 1, z: 0 },
+    { id: 3, type: 'cart', lane: -1, z: speed * 2 },
+    { id: 4, type: 'tram', lane: 0, z: speed * 2 + 1 },
+    { id: 5, type: 'coin', lane: 0, z: 1 },
+    { id: 6, type: 'powerup', power: 'magnet', lane: 0, z: 2 },
+  ];
+  game.drainEvents();
+  assert.equal(game.revive(), true);
+  assert.equal(game.state, 'playing');
+  assert.equal(game.usedRevive, true);
+  assert.equal(game.reviveGrace, 2);
+  assert.equal(game.coins, 5);
+  assert.equal(game.speed, speed);
+  assert.equal(game.score, score);
+  assert.equal(game.elapsedTime, elapsed);
+  assert.equal(game.distance, distance);
+  assert.deepEqual(game.objects.map(object => object.id), [1, 4, 5, 6]);
+  assert.deepEqual(game.drainEvents(), [{ type: 'revive' }]);
+  game.pause();
+  const paused = game.snapshot();
+  advance(game, 4);
+  assert.deepEqual(game.snapshot(), paused);
+  game.resume();
+  game.objects = [{ id: 7, type: 'tram', lane: 0, z: 0.01 }];
+  game.update(1 / 120);
+  assert.equal(game.state, 'playing', 'revive grace protects against new nearby hazards');
+  advance(game, 2);
+  game.objects = [{ id: 8, type: 'tram', lane: 0, z: 0.01 }];
+  game.update(1 / 120);
+  assert.equal(game.state, 'over');
+  game.coins = 1000;
+  assert.equal(game.revive(), false, 'a run gets only one revive');
+  game.reset();
+  assert.equal(game.usedRevive, false);
+  assert.equal(game.reviveGrace, 0);
+});
+
+test('run stats count successful actions and pickups, snapshot independently and reset cleanly', () => {
+  const game = emptyGame();
+  game.action('jump');
+  game.action('jump');
+  advance(game, 1.1);
+  game.action('roll');
+  game.action('roll');
+  pickup(game, 'shield');
+  game.objects = [{ id: 1, type: 'tram', lane: 0, z: 0.01 }];
+  game.update(1 / 120);
+  game.coins = SURFBOARD_COST;
+  game.buySurfboard();
+  game.buySurfboard();
+  assert.deepEqual(game.stats, { records: 0, jumps: 1, rolls: 1, powerups: 1, nearMisses: 0, flights: 1, shieldsUsed: 1 });
+  const snapshot = game.snapshot();
+  snapshot.stats.jumps = 100;
+  assert.equal(game.stats.jumps, 1);
+  game.reset();
+  assert.ok(Object.values(game.stats).every(count => count === 0));
+});
+
+test('seeded daily tracks repeat on every reset and support switching back to injected randomness', () => {
+  const game = new Game({ seed: '2026-09-16', random: () => 0.5 });
+  const first = game.snapshot();
+  game.start();
+  assert.deepEqual(game.objects, first.objects);
+  game._random();
+  game._random();
+  game.reset();
+  assert.deepEqual(game.snapshot(), first);
+  const second = new Game({ seed: '2026-09-16' });
+  assert.deepEqual(second.objects, game.objects);
+  const tomorrow = new Game({ seed: '2026-09-17' });
+  assert.notDeepEqual(tomorrow.objects, game.objects);
+  game.seed = '2026-09-17';
+  game.reset();
+  assert.deepEqual(game.objects, tomorrow.objects);
+  game.seed = undefined;
+  game.reset();
+  assert.deepEqual(game.objects, new Game({ random: () => 0.5 }).objects);
+});
+
+test('buying a daily flight cannot change future ground obstacles', () => {
+  const ground = new Game({ seed: 'daily-course' });
+  const flying = new Game({ seed: 'daily-course' });
+  const courses = [new Map(), new Map()];
+  for (const game of [ground, flying]) {
+    game.start();
+    game.powerups.ghost = 90;
+    game.coins = SURFBOARD_COST;
+  }
+  flying.buySurfboard();
+  for (let frame = 0; frame < 40 * 60; frame += 1) {
+    for (const [index, game] of [ground, flying].entries()) {
+      for (const object of game.objects) {
+        if (!HAZARDS.includes(object.type)) continue;
+        const absoluteZ = Math.round((game.distance + object.z) * 1e6) / 1e6;
+        courses[index].set(`${absoluteZ}:${object.lane}`, { lane: object.lane, type: object.type, absoluteZ });
+      }
+      game.update(1 / 60);
+    }
+  }
+  assert.ok(courses[0].size > 20, 'the comparison includes newly generated ground rows');
+  assert.deepEqual([...courses[0].values()], [...courses[1].values()]);
+  assert.equal(ground.distance, flying.distance);
 });

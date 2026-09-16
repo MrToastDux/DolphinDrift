@@ -3,6 +3,49 @@ import { DolphinRig } from './dolphin.js';
 const TAU = Math.PI * 2;
 const lerp = (a, b, t) => a + (b - a) * t;
 const hash = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+const DISTRICT_LENGTH = 750;
+const DISTRICTS = [
+  {
+    name: 'Palm Line', night: 0, market: 0,
+    colors: {
+      skyTop: '#b7d7bd', skyMid: '#dedaaf', skyLow: '#f4cea4', sun: '#fff0bf',
+      waterTop: '#b2cdb1', waterMid: '#9ec7b5', waterLow: '#76b6ad',
+      haze: '#e4dfb9', skyline: '#8eaf9c', towerDark: '#739d89', towerLight: '#9db99d',
+      roadTop: '#b5cdb3', roadMid: '#86b7a0', roadLow: '#659e8c', edge: '#ede4a0', lamp: '#e5f8c6',
+    },
+  },
+  {
+    name: 'Sunset Market', night: .08, market: 1,
+    colors: {
+      skyTop: '#d5aab0', skyMid: '#edbd9a', skyLow: '#ffe0af', sun: '#fff1c4',
+      waterTop: '#c9bca1', waterMid: '#a4b5a3', waterLow: '#7ca69f',
+      haze: '#ecd4b1', skyline: '#aa938b', towerDark: '#927d7c', towerLight: '#c0ab95',
+      roadTop: '#cbbfa3', roadMid: '#a5b19a', roadLow: '#809d87', edge: '#f5d49a', lamp: '#ffe9bd',
+    },
+  },
+  {
+    name: 'Neon Harbour', night: 1, market: 0,
+    colors: {
+      skyTop: '#3e526c', skyMid: '#8f8da6', skyLow: '#c6b7ba', sun: '#ecead7',
+      waterTop: '#7b9d9f', waterMid: '#568b91', waterLow: '#386f7d',
+      haze: '#afaabb', skyline: '#5c798a', towerDark: '#426b76', towerLight: '#72949a',
+      roadTop: '#91aaa6', roadMid: '#668c8c', roadLow: '#4f7b7e', edge: '#b6efd5', lamp: '#b2fff0',
+    },
+  },
+];
+
+export function getDistrict(distance = 0) {
+  const travelled = Math.max(0, Number.isFinite(distance) ? distance : 0);
+  const segment = Math.floor(travelled / DISTRICT_LENGTH);
+  const index = segment % DISTRICTS.length;
+  return { name: DISTRICTS[index].name, index, progress: travelled % DISTRICT_LENGTH / DISTRICT_LENGTH, nextAt: (segment + 1) * DISTRICT_LENGTH };
+}
+
+function mixColor(from, to, amount) {
+  const a = parseInt(from.slice(1), 16), b = parseInt(to.slice(1), 16);
+  const channel = shift => Math.round(lerp((a >> shift) & 255, (b >> shift) & 255, amount)).toString(16).padStart(2, '0');
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
 
 export class Renderer {
   constructor(canvas) {
@@ -18,6 +61,10 @@ export class Renderer {
     this.flyingRecords = [];
     this.flash = 0;
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.themeName = DISTRICTS[0].name;
+    this.palette = { ...DISTRICTS[0].colors };
+    this.night = 0;
+    this.market = 0;
     this.resize();
   }
 
@@ -75,17 +122,17 @@ export class Renderer {
   }
 
   burst(type, game, event = {}) {
-    if (type === 'crash') this.flash = .35;
+    if (type === 'crash' && !this.reducedMotion) this.flash = .35;
     if (type === 'coin' && event.magnetic && event.from && !this.reducedMotion) {
       const origin = this.project(event.from.lane * 1.82, event.from.height ?? .85, event.from.z);
       this.flyingRecords.push({ x: origin.x, y: origin.y, life: .36, max: .36 });
     }
-    if (!['coin', 'powerup', 'shield-break', 'surfboard', 'surfboard-end'].includes(type) || this.reducedMotion) return;
+    if (!['coin', 'powerup', 'shield-break', 'surfboard', 'surfboard-end', 'near-miss', 'revive', 'achievement'].includes(type) || this.reducedMotion) return;
     const altitude = game.player.altitude || 0;
     const p = this.project(game.player.x * 1.82, altitude + (altitude ? .6 : 1.2) + game.player.jump, 0);
-    const count = type === 'coin' ? 9 : ['ghost', 'spring'].includes(event.power) ? 12 : 24;
+    const count = type === 'coin' ? 9 : type === 'near-miss' ? 7 : ['ghost', 'spring'].includes(event.power) ? 12 : 24;
     const powerColors = { shield: '#b9ffea', magnet: '#ffc093', ghost: '#ded3f5', spring: '#b2def5' };
-    const color = type === 'shield-break' ? powerColors.shield : powerColors[event.power] || '#ffdf86';
+    const color = type === 'near-miss' ? '#d6f9f0' : type === 'revive' ? '#b9ffea' : type === 'shield-break' ? powerColors.shield : powerColors[event.power] || '#ffdf86';
     for (let i = 0; i < count; i++) {
       const angle = i / count * TAU;
       this.particles.push({ x: p.x, y: p.y, vx: Math.cos(angle) * (40 + Math.random() * 80), vy: Math.sin(angle) * 90 - 35, life: .65, max: .65, color });
@@ -103,6 +150,8 @@ export class Renderer {
     this.horizon = h * lerp(w < 700 ? .52 : .36, .34, this.camera);
     this.focal = Math.min(h * 1.12, w * 1.05);
     this.cameraHeight = (h * .88 - this.horizon) * 7.5 / this.focal + this.flightCamera * .76;
+    this.updateDistrict(game.distance);
+    if (this.reducedMotion) { this.particles.length = 0; this.flyingRecords.length = 0; this.flash = 0; }
     this.background();
     this.road(game.distance);
 
@@ -124,6 +173,12 @@ export class Renderer {
       let z = ((i * 20 + 12 - game.distance) % 240 + 240) % 240;
       if (z > 1) entries.push({ kind: 'light', z, x: i % 2 ? -3.15 : 3.15 });
     }
+    if (this.market > .01) {
+      for (let i = 0; i < 4; i++) {
+        const z = ((i * 62 + 31 - game.distance * .75) % 248 + 248) % 248;
+        if (z > 4) entries.push({ kind: 'market', z, x: i % 2 ? -5.6 : 5.6, seed: i });
+      }
+    }
     for (const object of game.objects) if (object.z > -3 && object.z < 210) entries.push({ ...object, kind: 'object' });
     entries.push({ kind: 'player', z: 0 });
     entries.sort((a, b) => b.z - a.z);
@@ -132,9 +187,11 @@ export class Renderer {
       if (entry.kind === 'light') this.trackLight(entry);
       if (entry.kind === 'speaker') this.speaker(entry);
       if (entry.kind === 'bunting') this.bunting(entry.z);
+      if (entry.kind === 'market') this.marketStall(entry);
       if (entry.kind === 'object') this.object(entry);
       if (entry.kind === 'player') this.dolphin(game);
     }
+    this.speedStreaks(game);
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -165,20 +222,56 @@ export class Renderer {
     }
   }
 
+  updateDistrict(distance) {
+    const district = getDistrict(distance);
+    this.themeName = district.name;
+    const from = DISTRICTS[district.index], to = DISTRICTS[(district.index + 1) % DISTRICTS.length];
+    const fade = Math.max(0, (district.progress - .78) / .22);
+    const blend = fade * fade * (3 - 2 * fade);
+    for (const key of Object.keys(from.colors)) this.palette[key] = mixColor(from.colors[key], to.colors[key], blend);
+    this.night = lerp(from.night, to.night, blend);
+    this.market = lerp(from.market, to.market, blend);
+  }
+
+  speedStreaks(game) {
+    if (this.reducedMotion || game.state !== 'playing') return;
+    const intensity = Math.min(1, Math.max(0, (game.speed - 20) / 18));
+    if (!intensity) return;
+    const c = this.ctx, w = this.width, h = this.height;
+    c.save();
+    c.globalAlpha = intensity * .24;
+    // Peripheral wind trails leave the lanes and their obstacles unobscured.
+    for (let i = 0; i < 12; i++) {
+      const phase = (this.time * (.30 + intensity * .35) + hash(i + 303)) % 1;
+      const side = i % 2 ? -1 : 1;
+      const y = this.horizon + (h - this.horizon) * (.1 + phase * .85);
+      const x = w * .5 + side * w * (.38 + phase * .17);
+      const length = (14 + hash(i + 90) * 30) * (.3 + phase);
+      this.line([{ x, y }, { x: x + side * length * .4, y: y + length }], this.palette.lamp, .8 + phase);
+    }
+    c.restore();
+  }
+
   background() {
     const c = this.ctx, w = this.width, h = this.height, hz = this.horizon;
+    const p = this.palette;
     const sky = c.createLinearGradient(0, 0, 0, hz + h * .15);
-    sky.addColorStop(0, '#b7d7bd');
-    sky.addColorStop(.55, '#dedaaf');
-    sky.addColorStop(1, '#f4cea4');
+    sky.addColorStop(0, p.skyTop);
+    sky.addColorStop(.55, p.skyMid);
+    sky.addColorStop(1, p.skyLow);
     c.fillStyle = sky;
     c.fillRect(0, 0, w, h);
+    if (this.night > .1) {
+      c.save(); c.globalAlpha = (this.night - .1) * .7;
+      for (let i = 0; i < 44; i++) this.ellipse(hash(i + 401) * w, hash(i + 508) * hz * .75, i % 8 ? .7 : 1.2, i % 8 ? .7 : 1.2, '#fff4db');
+      c.restore();
+    }
 
     const sx = this.center + w * .04, sy = hz - h * .135, sr = Math.min(w * .078, h * .13);
     const halo = c.createRadialGradient(sx, sy, sr * .2, sx, sy, sr * 2.5);
     halo.addColorStop(0, '#ffedb57a'); halo.addColorStop(1, '#ffedb500');
     this.ellipse(sx, sy, sr * 2.5, sr * 2.5, halo);
-    this.ellipse(sx, sy, sr, sr, '#fff0bf');
+    this.ellipse(sx, sy, sr, sr, p.sun);
     c.save();
     c.beginPath(); c.ellipse(sx, sy, sr * 1.6, sr * .43, -.35, 0, TAU);
     c.strokeStyle = '#ffffde70'; c.lineWidth = 1; c.stroke();
@@ -187,12 +280,12 @@ export class Renderer {
     // A distant island and a small, sun-bleached skyline.
     c.beginPath(); c.moveTo(0, hz + 6);
     for (let i = 0; i <= 32; i++) c.lineTo(w * i / 32, hz - h * (.009 + hash(i + 40) * .023));
-    c.lineTo(w, hz + 12); c.closePath(); c.fillStyle = '#9bbba377'; c.fill();
+    c.lineTo(w, hz + 12); c.closePath(); c.fillStyle = p.skyline + '77'; c.fill();
     for (let i = 0; i < 28; i++) {
       const x = w * (.38 + i * .024);
       const bw = w * (.013 + hash(i + 2) * .016);
       const bh = h * (.025 + hash(i + 30) * .08);
-      this.rect(x, hz - bh, bw, bh + 3, [bw * .35, bw * .35, 0, 0], '#8eaf9c53');
+      this.rect(x, hz - bh, bw, bh + 3, [bw * .35, bw * .35, 0, 0], p.skyline + '75');
       c.fillStyle = '#e4e7bf66'; c.fillRect(x + bw * .2, hz - bh + 6, bw * .13, bh * .75);
     }
     this.tower(w * .83, hz, h * .25, w * .043, 0);
@@ -200,7 +293,7 @@ export class Renderer {
     this.tower(w * .53, hz + 2, h * .13, w * .030, 2);
     this.tower(w * .98, hz, h * .30, w * .06, 3);
     // A silent sky tram and its fine aerial line.
-    const tramX = this.center + w * .16 + Math.sin(this.time * .06) * w * .018;
+    const tramX = this.center + w * .16 + (this.reducedMotion ? 0 : Math.sin(this.time * .06) * w * .018);
     const tramY = hz - h * .11;
     this.line([{ x: w * .73, y: tramY + 8 }, { x: w, y: tramY + 8 }], '#698f7e30', 1);
     this.rect(tramX, tramY, w * .065, h * .016, 8, '#719b8a');
@@ -208,12 +301,12 @@ export class Renderer {
     this.line([{ x: tramX + 6, y: tramY + h * .020 }, { x: tramX + w * .059, y: tramY + h * .020 }], '#b2f7d5', 2);
 
     const water = c.createLinearGradient(0, hz, 0, h);
-    water.addColorStop(0, '#b2cdb1'); water.addColorStop(.12, '#9ec7b5'); water.addColorStop(.6, '#91c5b8'); water.addColorStop(1, '#76b6ad');
+    water.addColorStop(0, p.waterTop); water.addColorStop(.12, p.waterMid); water.addColorStop(1, p.waterLow);
     c.fillStyle = water; c.fillRect(0, hz + 5, w, h - hz);
     for (let i = 0; i < 68; i++) {
       const depth = hash(i + 90);
       const y = hz + 9 + depth * depth * (h - hz);
-      const x = hash(i + 20) * w + Math.sin(this.time * .27 + i) * 5;
+      const x = hash(i + 20) * w + (this.reducedMotion ? 0 : Math.sin(this.time * .27 + i) * 5);
       const len = (8 + hash(i + 18) * 70) * (.15 + depth);
       this.line([{ x, y }, { x: x + len, y }], i % 3 ? '#d9eccc33' : '#4c9e9a22', .7 + depth);
     }
@@ -224,8 +317,9 @@ export class Renderer {
       this.line([{ x: sx - length / 2, y }, { x: sx + length / 2, y }], '#ffebbd32', 2);
     }
     const haze = c.createLinearGradient(0, hz - 15, 0, hz + 40);
-    haze.addColorStop(0, '#e4dfb900'); haze.addColorStop(.5, '#e4dfb98a'); haze.addColorStop(1, '#e4dfb900');
+    haze.addColorStop(0, p.haze + '00'); haze.addColorStop(.5, p.haze + '8a'); haze.addColorStop(1, p.haze + '00');
     c.fillStyle = haze; c.fillRect(0, hz - 15, w, 55);
+    this.harbour();
     // Soft film falloff keeps the title readable without a panel.
     if (this.camera < 1) {
       const shade = c.createLinearGradient(0, 0, w * .6, 0);
@@ -238,13 +332,18 @@ export class Renderer {
   tower(x, y, height, width, seed) {
     const c = this.ctx;
     const gradient = c.createLinearGradient(x, 0, x + width, 0);
-    gradient.addColorStop(0, '#739d89'); gradient.addColorStop(.6, '#9db99d'); gradient.addColorStop(1, '#668e7b');
+    gradient.addColorStop(0, this.palette.towerDark); gradient.addColorStop(.6, this.palette.towerLight); gradient.addColorStop(1, this.palette.towerDark);
     this.rect(x, y - height, width, height, [width * .4, width * .4, 0, 0], gradient);
     this.rect(x + width * .12, y - height + 8, width * .19, height * .80, width * .08, '#c4d4ab65');
     for (let j = 1; j < 7; j++) {
       const yy = y - height + j * height / 8;
       this.rect(x - width * .04, yy, width * 1.08, 3, 2, '#5b8c7740');
       this.rect(x + width * .65, yy + 5, width * .20, 2, 1, '#e8e9b98a');
+      if (this.night > .1) {
+        c.save(); c.globalAlpha = this.night * .7;
+        this.rect(x + width * .22, yy + 4, width * .28, 2, 1, seed % 2 ? '#ffc5b1' : '#b9ffec');
+        c.restore();
+      }
     }
     if (seed % 2 === 0) {
       const yy = y - height * .72;
@@ -255,11 +354,34 @@ export class Renderer {
     this.ellipse(x + width / 2, y - height - 12, 2, 2, '#eef5c8');
   }
 
+  harbour() {
+    if (this.night < .02) return;
+    const c = this.ctx, w = this.width, h = this.height, hz = this.horizon;
+    c.save(); c.globalAlpha = this.night;
+    for (let i = 0; i < 2; i++) {
+      const x = w * (.09 + i * .15), y = hz + h * (.026 + i * .018);
+      const bob = this.reducedMotion ? 0 : Math.sin(this.time * .45 + i * 2) * .5;
+      const size = Math.min(w * .035, 30);
+      this.poly([{ x: x - size, y: y + bob }, { x: x + size, y: y + bob }, { x: x + size * .63, y: y + size * .23 + bob }, { x: x - size * .55, y: y + size * .23 + bob }], '#406677');
+      this.line([{ x, y: y + bob }, { x, y: y - size * 1.1 + bob }], '#708f98', 1);
+      this.poly([{ x: x + 2, y: y - size + bob }, { x: x + 2, y: y - 3 + bob }, { x: x + size * .75, y: y - 3 + bob }], '#d5d7ca');
+      this.line([{ x: x - size * .35, y: y + size * .6 }, { x: x + size * .55, y: y + size * .6 }], '#b3d4c336', 2);
+    }
+    // Slender dock cranes sit beyond the left-hand shore.
+    for (let i = 0; i < 3; i++) {
+      const x = w * (.03 + i * .075), height = h * (.045 + hash(i + 81) * .025);
+      this.line([{ x, y: hz }, { x, y: hz - height }, { x: x + w * .058, y: hz - height * 1.23 }], '#587b8970', 2);
+      this.line([{ x: x + w * .05, y: hz - height * 1.2 }, { x: x + w * .05, y: hz - height * .35 }], '#587b8960', 1);
+      this.ellipse(x, hz - height, 1.5, 1.5, '#ffd3ad');
+    }
+    c.restore();
+  }
+
   road(distance) {
     const c = this.ctx;
     this.quad(-3.15, 3.15, -4, 240, -.22, '#538c7b');
     const pavement = c.createLinearGradient(0, this.horizon, 0, this.height);
-    pavement.addColorStop(0, '#b5cdb3'); pavement.addColorStop(.35, '#86b7a0'); pavement.addColorStop(1, '#659e8c');
+    pavement.addColorStop(0, this.palette.roadTop); pavement.addColorStop(.35, this.palette.roadMid); pavement.addColorStop(1, this.palette.roadLow);
     this.quad(-2.95, 2.95, -4, 240, 0, pavement);
     this.quad(-.89, .89, -4, 240, .003, '#d8ead012');
     // Passing expansion joints give the walking pace a sense of motion.
@@ -270,7 +392,7 @@ export class Renderer {
       if (i % 2 === 0) this.quad(-2.91, 2.91, z, z + 3, .005, '#e8f2d108');
     }
     for (const x of [-2.95, 2.95]) {
-      this.quad(x - .042, x + .042, -4, 240, .02, '#ede4a0');
+      this.quad(x - .042, x + .042, -4, 240, .02, this.palette.edge);
       this.quad(x - .085, x + .085, -4, 240, -.07, '#8ae1b18c');
     }
     for (const x of [-.91, .91]) {
@@ -306,7 +428,37 @@ export class Renderer {
       const y = 4.9 - .5 * (1 - (x / 3.25) ** 2);
       const flutter = this.reducedMotion ? 0 : Math.sin(this.time * 1.2 + i) * .06;
       this.poly([this.project(x - .25, y, z), this.project(x + .25, y, z), this.project(x + flutter, y - .49, z)], ['#c98461', '#e0be68', '#579067'][i % 3]);
+      const warmth = Math.max(this.market, this.night);
+      if (warmth > .02) {
+        const light = this.project(x, y - .13, z);
+        c.save(); c.globalAlpha = warmth * .85;
+        this.ellipse(light.x, light.y, light.scale * .055, light.scale * .07, this.palette.lamp);
+        this.ellipse(light.x, light.y, light.scale * .13, light.scale * .16, this.palette.lamp + '24');
+        c.restore();
+      }
     }
+  }
+
+  marketStall({ x, z, seed }) {
+    const c = this.ctx;
+    c.save(); c.globalAlpha = this.market;
+    const front = seed % 2 ? '#b67d63' : '#698d7a';
+    this.box(x, z, 2.15, .95, 1.1, [front, '#dfc69b', '#92795e']);
+    for (const side of [-1, 1]) this.box(x + side * .94, z, .07, 2.5, .08, ['#8f8964', '#e1ce9a', '#6c765a']);
+    this.box(x, z - .06, 2.45, .2, 1.4, ['#d59873', '#edc993', '#ae7c62'], 2.45);
+    for (let i = 0; i < 5; i++) {
+      this.box(x - .95 + i * .48, z - .075, .23, .28, .02, ['#f2dab0', '#f2dab0', '#c09f75'], 2.37);
+      const fruit = this.project(x - .78 + i * .39, 1.12, z + .1);
+      this.ellipse(fruit.x, fruit.y, fruit.scale * .14, fruit.scale * .13, i % 2 ? '#e6b26b' : '#9eb96d');
+    }
+    const sign = this.project(x, 1.92, z - .08);
+    this.rect(sign.x - sign.scale * .60, sign.y - sign.scale * .12, sign.scale * 1.2, sign.scale * .30, sign.scale * .03, '#6a7758');
+    if (sign.scale > 12) {
+      c.fillStyle = '#ffedc4'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = `600 ${Math.max(5, sign.scale * .12)}px sans-serif`;
+      c.fillText(seed % 2 ? 'ISLAND FRUIT' : 'FRESH JUICE', sign.x, sign.y + sign.scale * .03);
+    }
+    c.restore();
   }
 
   speaker({ x, z }) {
@@ -331,7 +483,13 @@ export class Renderer {
   trackLight({ x, z }) {
     const a = this.project(x, 0, z), b = this.project(x, .45, z);
     this.line([a, b], '#5a947f', Math.max(1, b.scale * .045));
-    this.ellipse(b.x, b.y, b.scale * .09, b.scale * .035, '#e5f8c6');
+    if (this.night > .1) {
+      const c = this.ctx;
+      c.save(); c.globalAlpha = this.night;
+      this.ellipse(b.x, b.y, b.scale * .21, b.scale * .16, this.palette.lamp + '22');
+      c.restore();
+    }
+    this.ellipse(b.x, b.y, b.scale * .09, b.scale * .035, this.palette.lamp);
   }
 
   palm({ x, z, seed }) {
@@ -378,7 +536,7 @@ export class Renderer {
     const { lane, z, type } = object, x = lane * 1.82;
     const c = this.ctx, floor = this.project(x, .02, z);
     if (type === 'powerup') {
-      const p = this.project(x, 1.05 + Math.sin(this.time * 2 + object.id) * .1, z);
+      const p = this.project(x, 1.05 + (this.reducedMotion ? 0 : Math.sin(this.time * 2 + object.id) * .1), z);
       const radius = .43 * p.scale;
       const colors = {
         magnet: ['#f5a07c', '#815841'], shield: ['#a2e4d1', '#376e65'],
@@ -391,7 +549,7 @@ export class Renderer {
       glow.addColorStop(0, bright + '69'); glow.addColorStop(1, bright + '00');
       this.ellipse(p.x, p.y, radius * 2, radius * 2, glow);
       c.save(); c.translate(p.x, p.y);
-      c.rotate(Math.sin(this.time * 1.5 + object.id) * .05);
+      if (!this.reducedMotion) c.rotate(Math.sin(this.time * 1.5 + object.id) * .05);
       this.rect(-radius, -radius, radius * 2, radius * 2, radius * .45, bright);
       c.strokeStyle = '#fff5d6c9'; c.lineWidth = Math.max(1, radius * .055);
       c.beginPath(); c.roundRect(-radius, -radius, radius * 2, radius * 2, radius * .45); c.stroke();
@@ -425,9 +583,9 @@ export class Renderer {
       return;
     }
     if (type === 'coin') {
-      const p = this.project(x, (object.height ?? (object.sky ? 5.05 : .88)) + Math.sin(this.time * 2.2 + object.id) * .045, z);
+      const p = this.project(x, (object.height ?? (object.sky ? 5.05 : .88)) + (this.reducedMotion ? 0 : Math.sin(this.time * 2.2 + object.id) * .045), z);
       const radius = (object.sky ? .24 : .19) * p.scale;
-      const spin = .72 + Math.sin(this.time * 1.8 + object.id * .15) * .18;
+      const spin = this.reducedMotion ? .85 : .72 + Math.sin(this.time * 1.8 + object.id * .15) * .18;
       if (!object.sky) this.ellipse(floor.x, floor.y, radius * .8, radius * .19, '#547e6240');
       this.ellipse(p.x, p.y, radius * (object.sky ? 2.2 : 1.65), radius * (object.sky ? 2.2 : 1.65), object.sky ? '#fff1a02d' : '#ffde7e15');
       if (object.sky) {

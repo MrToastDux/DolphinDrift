@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dolphin Drift — feature smoke tests</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f6ef; color: #214e48; font: 14px/1.5 system-ui, sans-serif; }
+    header { padding: 20px 24px 12px; }
+    h1 { margin: 0; font-size: 24px; }
+    p { margin: 4px 0; color: #647c71; }
+    #status { display: block; margin-top: 10px; font-weight: 700; }
+    #status[data-state="failed"], .fail { color: #aa3528; }
+    #results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr)); gap: 4px 20px; margin: 0; padding: 0 24px 18px; list-style: none; }
+    #results li { padding: 4px 8px; background: #e8eee3; border-radius: 5px; }
+    #results li.fail { background: #f6e0d9; white-space: pre-wrap; overflow-wrap: anywhere; }
+    iframe { display: block; width: 100%; height: max(760px, 85vh); border: 0; border-top: 1px solid #cfdccf; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dolphin Drift · feature smoke tests</h1>
+    <p>Runs real controls and collisions in a same-origin iframe. Uses an isolated debug profile and leaves saved progress untouched.</p>
+    <output id="status" role="status" data-state="running">Waiting for the game…</output>
+  </header>
+  <ol id="results" aria-label="Feature integration test results"></ol>
+  <iframe id="game" src="../?debug" title="Actual game feature integration tests"></iframe>
+  <script type="module">
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+    const iframe = document.getElementById('game');
+    const startedAt = performance.now();
+    let passed = 0;
+    let currentCase = 'Game boot';
+    const assert = (condition, description) => { if (!condition) throw new Error(description); };
+    const frames = async (count = 2) => {
+      for (let i = 0; i < count; i++) await new Promise(resolve => requestAnimationFrame(resolve));
+    };
+    const test = async (name, run) => {
+      currentCase = name;
+      await run();
+      const item = document.createElement('li');
+      item.textContent = `PASS · ${name}`;
+      results.append(item);
+      passed++;
+    };
+    const readSavedProgress = () => {
+      try {
+        return JSON.stringify(['dolphin-drift-profile', 'dolphin-drift-best'].map(key => localStorage.getItem(key)));
+      } catch { return null; }
+    };
+    const savedBefore = readSavedProgress();
+    try {
+      while (!iframe.contentWindow?.__drift) {
+        assert(performance.now() - startedAt < 10000, 'The opt-in debug hook did not load within 10 seconds.');
+        await frames(1);
+      }
+      const child = iframe.contentWindow;
+      const doc = iframe.contentDocument;
+      const { game, renderer, audio } = child.__drift;
+      const { REVIVE_COST, POWERUP_DURATIONS, START_SPEED } = await import('../src/game.js');
+      const { ACHIEVEMENTS, dailySeed, localDateKey } = await import('../src/progression.js');
+      const $ = id => doc.getElementById(id);
+      const profile = () => child.__drift.profile;
+      const key = value => doc.dispatchEvent(new child.KeyboardEvent('keydown', {
+        key: value, bubbles: true, cancelable: true,
+      }));
+      const clearTrack = () => {
+        game.objects = [];
+        game._nextRow = 1e9;
+        game._nextSky = 1e9;
+      };
+      let nextObjectId = 50000;
+      const collect = count => {
+        game.objects = Array.from({ length: count }, () => ({
+          id: nextObjectId++, type: 'coin', lane: game.player.lane, z: .01,
+        }));
+        game.update(.02);
+        clearTrack();
+      };
+      const crash = async () => {
+        clearTrack();
+        game.objects = [{ id: nextObjectId++, type: 'tram', lane: game.player.lane, z: .01 }];
+        game.update(.02);
+        assert(game.state === 'over', 'The real collision should end the run.');
+        await frames();
+      };
+      const routeSignature = () => JSON.stringify(game.objects.map(({ type, lane, power, sky, height }) => ({ type, lane, power, sky, height })));
+      const overlaps = (a, b) => a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1;
+      let initialRoute;
+      let runDate;
+      let finalRecords;
+      status.textContent = 'Running daily-route, progression, revive, and layout checks…';
+
+      await test('Ready controls expose both modes and can mute before starting', async () => {
+        assert(game.state === 'ready' && profile().runs === 0, 'Debug mode should start with a fresh ready profile.');
+        assert($('mode-endless').getAttribute('aria-pressed') === 'true', 'Endless should be selected initially.');
+        assert($('mode-daily').getAttribute('aria-pressed') === 'false', 'Daily route should be an available alternative.');
+        assert(!audio.enabled, 'Audio should start disabled.');
+        // Both clicks run before audio.enable() resumes, recording an explicit mute
+        // preference without allowing the radio scheduler to begin playback.
+        $('sound').click();
+        $('sound').click();
+        await frames();
+        assert(!audio.enabled && profile().settings.muted, 'The sound button should preserve an explicit muted preference.');
+        assert($('sound').getAttribute('aria-pressed') === 'false', 'The sound button should report its muted state.');
+      });
+
+      await test('Daily selection and the actual start button use today’s route seed', async () => {
+        profile().daily = { date: '2000-01-01', bestDistance: 90000, bestScore: 900000 };
+        $('mode-daily').click();
+        runDate = localDateKey();
+        assert($('mode-daily').getAttribute('aria-pressed') === 'true', 'Daily selection should update its pressed state.');
+        assert($('mode-endless').getAttribute('aria-pressed') === 'false', 'Only one mode may be selected.');
+        assert($('mode-note').textContent.includes(runDate), 'Daily description should show the local calendar date.');
+        $('start').click();
+        assert(game.state === 'playing' && game.seed === dailySeed(runDate), 'Start should select the daily seed and begin the game.');
+        initialRoute = routeSignature();
+        assert(game.objects.length > 5, 'The daily signature should contain a real generated route.');
+        clearTrack();
+        await frames();
+        assert($('intro').inert && $('game-shell').dataset.state === 'playing', 'Starting should hide and disable intro controls.');
+        assert($('district-name').textContent.startsWith('DAILY /'), 'The run display should identify the daily route.');
+        assert(!audio.enabled, 'Starting after an explicit mute must leave audio off.');
+      });
+
+      await test('Real pickups build a 12-record combo and update speed and score', async () => {
+        game.elapsedTime = 40;
+        collect(12);
+        await frames();
+        assert(game.stats.records === 12 && game.coins === 12, 'All 12 real pickups should count once and retain one-for-one currency.');
+        assert(game.combo === 12 && game.multiplier === 2, 'Twelve consecutive records should reach a ×2 score multiplier.');
+        assert(game.speed > START_SPEED, 'Speed should increase after more playing time.');
+        assert($('speed-value').textContent === game.speed.toFixed(1), 'The speed display should follow simulation speed.');
+        assert($('score').textContent === game.score.toLocaleString() && game.score >= 120, 'The score display should include collected-record points.');
+        assert($('multiplier').textContent === '×2' && $('combo-label').textContent.includes('12'), 'Combo labels should update from actual pickups.');
+        assert(parseFloat($('flow-progress').style.width) > 80, 'A fresh combo should have a nearly full countdown bar.');
+        assert(Number($('flow-meter').getAttribute('aria-valuenow')) > 4.8, 'Combo time should be exposed accessibly.');
+      });
+
+      await test('Pause shows live missions and freezes the complete run', async () => {
+        game.distance = 760;
+        game.objects = Array.from({ length: 5 }, () => ({ id: nextObjectId++, type: 'tram', lane: 1, z: .01 }));
+        game.update(.02);
+        clearTrack();
+        assert(game.stats.nearMisses === 5, 'Five safe adjacent hazards should count as real close dodges.');
+        $('pause').click();
+        await frames();
+        const missions = [...$('mission-list').children];
+        assert(game.state === 'paused' && !$('overlay').classList.contains('hidden'), 'Pause should show the run dialog.');
+        assert(missions.length === 3, 'The dialog should show exactly three missions.');
+        assert(missions[0].classList.contains('complete') && missions[0].textContent.includes('750 / 750'), 'The distance mission should be complete.');
+        assert(!missions[1].classList.contains('complete') && missions[1].textContent.includes('12 / 50'), 'The records mission should show actual collection progress.');
+        assert(missions[2].classList.contains('complete') && missions[2].textContent.includes('5 / 5'), 'Close-dodge progress should complete its mission.');
+        const frozen = JSON.stringify(game.snapshot());
+        await frames(4);
+        assert(JSON.stringify(game.snapshot()) === frozen, 'Pause should freeze speed, score, combo, and all simulation timers.');
+        assert(profile().runs === 0, 'Pausing should not count as a finished run.');
+      });
+
+      await test('Logbook opens, lists achievements, and applies less motion', async () => {
+        $('logbook-open').click();
+        await frames();
+        assert($('logbook').open && game.state === 'paused', 'Logbook should open without resuming the game.');
+        assert($('achievements').children.length === ACHIEVEMENTS.length, 'All nine achievements should appear in the logbook.');
+        assert($('career-stats').children.length === 4, 'The logbook should include the four career statistics.');
+        const previousMotion = renderer.reducedMotion;
+        $('reduced-motion').click();
+        assert(renderer.reducedMotion === !previousMotion, 'The checkbox should change the renderer preference.');
+        assert(profile().settings.reducedMotion === renderer.reducedMotion, 'The changed motion preference should enter the profile.');
+        assert(doc.documentElement.classList.contains('less-motion') === renderer.reducedMotion, 'The page should use the matching motion class.');
+        $('logbook-close').click();
+        assert(!$('logbook').open && game.state === 'paused', 'Closing the logbook should leave the run paused.');
+        $('resume').click();
+        await frames();
+        assert(game.state === 'playing' && $('overlay').classList.contains('hidden'), 'The actual resume button should continue the run.');
+      });
+
+      await test('390px and 320px layouts keep HUD, telemetry, and boosts separate', async () => {
+        const originalStyle = iframe.getAttribute('style');
+        game.powerups = { ...POWERUP_DURATIONS };
+        try {
+          for (const width of [390, 320]) {
+            iframe.style.width = `${width}px`;
+            iframe.style.height = '844px';
+            await frames(4);
+            assert(child.innerWidth === width, 'Layout tests should resize the actual game viewport.');
+            assert(doc.documentElement.scrollWidth <= width + 1, `${width}px layout must not overflow horizontally.`);
+            const shell = $('game-shell').getBoundingClientRect();
+            const sections = ['.hud', '.run-telemetry', '.boost-rail'].map(selector => ({ selector, rect: doc.querySelector(selector).getBoundingClientRect() }));
+            for (const { selector, rect } of sections) {
+              assert(rect.width > 0 && rect.height > 0, `${width}px ${selector} should be visible.`);
+              assert(rect.left >= shell.left - 1 && rect.right <= shell.right + 1 && rect.top >= shell.top - 1 && rect.bottom <= shell.bottom + 1, `${width}px ${selector} should stay inside the game.`);
+            }
+            for (let i = 0; i < sections.length; i++) {
+              for (let j = i + 1; j < sections.length; j++) {
+                assert(!overlaps(sections[i].rect, sections[j].rect), `${width}px ${sections[i].selector} must not overlap ${sections[j].selector}.`);
+              }
+            }
+            assert(Object.keys(POWERUP_DURATIONS).every(power => !$(`power-${power}`).classList.contains('hidden')), 'Layout should be checked with every boost bar visible.');
+          }
+        } finally {
+          if (originalStyle === null) iframe.removeAttribute('style');
+          else iframe.setAttribute('style', originalStyle);
+          game.powerups = Object.fromEntries(Object.keys(POWERUP_DURATIONS).map(power => [power, 0]));
+          await frames(4);
+        }
+      });
+
+      await test('A crash saves collected records, unlocks achievements, and rolls over the daily best', async () => {
+        collect(88);
+        assert(game.stats.records === 100 && game.coins === 100, 'The run should have exactly 100 collected records before crashing.');
+        game.distance = 900;
+        await crash();
+        assert(profile().runs === 1 && profile().totalRecords === 100, 'A completed run should be aggregated exactly once.');
+        assert(profile().daily.date === runDate, 'Daily progress should move from the old stored date to this run’s date.');
+        assert(profile().daily.bestDistance < 901 && profile().daily.bestDistance >= 900, 'A new date should replace yesterday’s distance record.');
+        assert(profile().daily.bestScore === game.score, 'Daily score should match the completed daily run.');
+        assert(!$('revive').classList.contains('hidden'), 'An affordable first revive should be offered.');
+        assert(!$('unlocked').classList.contains('hidden') && $('unlocked').textContent.includes('First Splash'), 'New achievements should appear on the result screen.');
+        assert($('run-summary').textContent.includes(game.score.toLocaleString()), 'Results should include the score.');
+        assert([...$('mission-list').children].every(row => row.classList.contains('complete')), 'All three achieved missions should show completion.');
+      });
+
+      await test('Revive spends 75 records, resumes, and preserves the unfinished run', async () => {
+        const records = game.stats.records;
+        const distance = game.distance;
+        $('revive').click();
+        assert(game.state === 'playing' && game.usedRevive, 'The actual revive button should resume the same run.');
+        assert(game.coins === 100 - REVIVE_COST && REVIVE_COST === 75, 'Revive should spend exactly 75 records.');
+        assert(game.stats.records === records && game.distance === distance, 'Reviving must preserve collected records and distance.');
+        assert(game.reviveGrace > 0, 'Revive should provide a short safe re-entry period.');
+        assert(profile().runs === 1 && profile().totalRecords === 100, 'Reviving should retain the first-crash checkpoint until this run is saved again.');
+        clearTrack();
+        await frames();
+        assert($('overlay').classList.contains('hidden'), 'Reviving should close the results overlay.');
+        collect(20);
+        finalRecords = game.stats.records;
+        assert(finalRecords === 120 && game.coins === 45, 'New pickups should count separately from the spent revive balance.');
+      });
+
+      await test('A later crash saves the whole run once and cannot revive twice', async () => {
+        game.reviveGrace = 0;
+        await crash();
+        assert(profile().runs === 1, 'A revived run should count as one career run after its final crash.');
+        assert(profile().totalRecords === finalRecords, 'Career records should use total collected, not the 45 records in hand or a duplicated subtotal.');
+        assert(profile().bestCombo === game.maxCombo, 'The saved best combo should retain the run’s maximum streak.');
+        assert($('revive').classList.contains('hidden'), 'The second crash must not offer another revive.');
+        const saved = JSON.stringify(profile());
+        await frames(4);
+        assert(JSON.stringify(profile()) === saved, 'Rendering the end screen again must not save another run.');
+        $('logbook-open').click();
+        assert($('achievements').querySelectorAll('.earned').length === profile().achievements.length, 'Logbook unlocks should agree with the saved profile.');
+        $('logbook-close').click();
+      });
+
+      await test('R retries the same daily route and resets score, combo, revive, and stats', async () => {
+        key('r');
+        assert(game.state === 'playing', 'R should start a fresh run from the game-over screen.');
+        assert(game.seed === dailySeed(runDate) && routeSignature() === initialRoute, 'Retrying today’s route should reproduce its initial obstacle and pickup sequence.');
+        assert(game.distance === 0 && game.score === 0 && game.coins === 0, 'Retry should reset all run totals.');
+        assert(game.combo === 0 && game.maxCombo === 0 && game.multiplier === 1, 'Retry should reset the streak and multiplier.');
+        assert(!game.usedRevive && game.reviveGrace === 0, 'Retry should restore its single revive opportunity.');
+        assert(Object.values(game.stats).every(value => value === 0), 'Retry should reset every run statistic.');
+        assert(profile().runs === 1 && profile().totalRecords === finalRecords, 'Retry must preserve career stats without counting the prior run twice.');
+        clearTrack();
+        await frames();
+        assert($('multiplier').textContent === '×1' && $('combo-label').textContent === 'find your flow', 'The HUD should show the reset combo.');
+      });
+
+      await test('Debug play leaves existing browser progress untouched and sound off', async () => {
+        assert(readSavedProgress() === savedBefore, 'Debug integration tests must not change the player’s persisted profile or best run.');
+        assert(!audio.enabled && profile().settings.muted, 'The full integration flow should preserve the explicit muted preference.');
+        assert(profile().daily.date === runDate && profile().daily.bestScore > 0, 'The previous completed daily record should remain after retry.');
+        $('pause').click();
+        await frames();
+        assert(game.state === 'paused', 'Leave the game safely paused for visual inspection.');
+      });
+
+      status.dataset.state = 'passed';
+      status.textContent = `PASS · All ${passed} feature integration checks passed. The game is paused below for visual review.`;
+    } catch (error) {
+      status.dataset.state = 'failed';
+      status.textContent = `FAIL · ${currentCase}. ${passed} earlier checks passed.`;
+      const item = document.createElement('li');
+      item.className = 'fail';
+      item.textContent = `FAIL · ${currentCase}\n${error?.stack || error}`;
+      results.append(item);
+      iframe.contentWindow?.__drift?.audio.disable();
+      iframe.contentWindow?.__drift?.game.pause();
+    }
+  </script>
+</body>
+</html>

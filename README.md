@@ -29,7 +29,19 @@ Powerups rotate through four types, with a pickup every **four obstacle rows** (
 
 Small progress bars on the left show active powerup time and surfboard savings or flight time. The surfboard control shows only its name, price, and progress. Gameplay has no popup messages or decorative cards. Sky records are only reachable on the surfboard, including with a magnet; ground records and powerups are collected on foot. Every record is worth one.
 
-Speed increases with active playing time, from **12 m/s** by **0.12 m/s each second**, up to **30 m/s**. Pausing freezes speed progression and all gameplay timers.
+Speed increases with active playing time, from **12 m/s** by **0.18 m/s each second**, up to **42 m/s** after about **2 minutes 47 seconds**. The live speed readout makes the ramp visible. Later obstacle rows preserve at least 1.25 seconds of reaction time; sky routes scale their spacing with speed. Pausing freezes speed progression and all gameplay timers.
+
+## New ways to drift
+
+- **Score and combos:** distance earns points, and each record earns 10 points. Collect again within 6 seconds to keep the streak alive. Every 12 records increases the score multiplier, up to ×5. Your best streak is saved. Currency remains one record per pickup.
+- **Close dodges:** passing close beside a ground hazard while on foot and unprotected earns 50 points multiplied by your current combo multiplier, with a small sound and particle effect.
+- **Three missions per run:** travel 750 m, collect 50 records, and make 5 near misses. Pause or finish to see your progress.
+- **Nine achievements and career stats:** open the **Logbook** for unlocked milestones, runs completed, total records, best score, and best streak. Completed runs and settings save in this browser, with graceful fallback when storage is unavailable.
+- **Daily route:** select it on the title screen for a repeatable track based on your local calendar date, with a separate daily best score. Retry the same route as often as you like. This is a local challenge, with no online leaderboard.
+- **One more wave:** after a crash, spend **75 records from that run** to revive once. Keep your distance, score, and speed, with two seconds of protection and nearby hazards cleared. The continued run counts as a single run in your career stats.
+- **Three districts:** Palm Line, Sunset Market, and Neon Harbour cycle every 750 m, with smooth palette transitions, market stalls, lanterns, stars, boats, and harbour cranes.
+- **Speed effects and personal best chase:** subtle wind trails build as the pace rises, and a compact readout shows how far remains to your best distance.
+- **Comfort controls:** the Logbook offers reduced effects and full screen where supported. Reduced motion follows your system preference initially. Your motion and mute choices are remembered.
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
@@ -38,6 +50,9 @@ Speed increases with active playing time, from **12 m/s** by **0.12 m/s each sec
 | Roll | Down arrow or S | Swipe down |
 | Buy a surfboard flight | B | Surfboard button (200 records) |
 | Pause / resume | Escape or P | Pause button |
+| Retry after a crash | R | Drift again |
+| Full screen | F | Logbook → Full screen |
+| Missions and progress | P to see this run's missions | Pause / Logbook |
 
 Use swipes and taps directly on the track on touchscreens. Press **Space** or select **Let's drift** to begin. Your first start also turns on island radio unless you muted it beforehand; use the sound button in the header to mute or unmute. Switching away from the game pauses the run.
 
@@ -48,9 +63,11 @@ npm test
 npm run check
 ```
 
-The gameplay tests cover movement, obstacle clearance, record collection, surfboard purchases and flight, sky routes, powerups, progressive speed, adjacent obstacle collisions, pause/restart, safe route generation, and frame timing. The check command validates JavaScript syntax. Open `/test/render-gallery.html` for fixed visual snapshots, including flight and a portrait canvas.
+The automated tests cover movement, obstacle clearance, record collection, surfboard purchases and flight, sky routes, powerups, progressive speed, safe generation, combos, near misses, revives, daily seeds, profile validation, missions, achievements, and daily rollover. The check command validates JavaScript syntax. Open `/test/render-gallery.html` for 16 fixed visual snapshots, including the new districts, high speed, flight, and portrait canvases.
 
 Open `/test/ui-smoke.html` to run the real interface through 16 browser checks for purchase eligibility, button and keyboard handling, four powerup bars, mobile layouts, countdowns, pause/resume, expiry, and reset. It uses isolated test balances and leaves a flight preview below the report; reload the normal game to play a regular run.
+
+Open `/test/feature-smoke.html` for browser checks covering daily mode, score/combo displays, missions, the Logbook, reduced motion, revive accounting, retry, and mobile layouts. Both harnesses use `?debug` to isolate their profiles from your saved progress.
 
 ## Files
 
@@ -59,6 +76,7 @@ Open `/test/ui-smoke.html` to run the real interface through 16 browser checks f
 - `src/dolphin.js` — articulated 3D dolphin, forward walking, and tucked somersaults.
 - `src/audio.js` — browser synthesizer music and sound effects.
 - `src/main.js` — controls, game state, interface, and local best score.
+- `src/progression.js` — validated profiles, daily seeds, missions, and achievements.
 - `src/style.css` and `index.html` — responsive presentation and interface.
 - `server.mjs` — dependency-free local web server.
 - `test/game.test.js` — simulation tests using Node's built-in test runner.
