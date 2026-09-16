@@ -177,7 +177,7 @@
         assert(game.state === 'playing' && $('overlay').classList.contains('hidden'), 'The actual resume button should continue the run.');
       });
 
-      await test('390px and 320px layouts keep HUD, telemetry, and boosts separate', async () => {
+      await test('390px and 320px layouts combine run info in the top banner without covering boosts', async () => {
         const originalStyle = iframe.getAttribute('style');
         game.powerups = { ...POWERUP_DURATIONS };
         try {
@@ -193,11 +193,10 @@
               assert(rect.width > 0 && rect.height > 0, `${width}px ${selector} should be visible.`);
               assert(rect.left >= shell.left - 1 && rect.right <= shell.right + 1 && rect.top >= shell.top - 1 && rect.bottom <= shell.bottom + 1, `${width}px ${selector} should stay inside the game.`);
             }
-            for (let i = 0; i < sections.length; i++) {
-              for (let j = i + 1; j < sections.length; j++) {
-                assert(!overlaps(sections[i].rect, sections[j].rect), `${width}px ${sections[i].selector} must not overlap ${sections[j].selector}.`);
-              }
-            }
+            const [hud, telemetry, boosts] = sections.map(section => section.rect);
+            assert(doc.querySelector('.hud').contains(doc.querySelector('.run-telemetry')), 'Run info belongs inside the top banner.');
+            assert(telemetry.top >= hud.top && telemetry.bottom <= hud.bottom, 'Run info must fit within the top banner.');
+            assert(!overlaps(hud, boosts), `${width}px top banner must leave the boosts clear.`);
             assert(Object.keys(POWERUP_DURATIONS).every(power => !$(`power-${power}`).classList.contains('hidden')), 'Layout should be checked with every boost bar visible.');
           }
         } finally {

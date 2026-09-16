@@ -3,7 +3,19 @@ import { Renderer, getDistrict } from './renderer.js';
 import { IslandAudio } from './audio.js';
 import { createProfile, finishRun, getMissions, ACHIEVEMENTS, dailySeed, localDateKey } from './progression.js';
 
-const $ = id => document.getElementById(id);
+const elements = new Map();
+const $ = id => {
+  if (!elements.has(id)) elements.set(id, document.getElementById(id));
+  return elements.get(id);
+};
+function setText(id, value) {
+  const node = $(id), text = String(value);
+  if (node.textContent !== text) node.textContent = text;
+}
+const powerMeters = Object.entries(POWERUP_DURATIONS).map(([power, duration]) => {
+  const meter = $(`power-${power}`);
+  return { power, duration, meter, bar: meter.querySelector('.power-progress'), label: meter.querySelector('strong') };
+});
 const game = new Game();
 const renderer = new Renderer($('world'));
 const audio = new IslandAudio();
@@ -96,33 +108,36 @@ function syncLogbook() {
 }
 
 function syncRunHud() {
-  $('score').textContent = game.score.toLocaleString();
-  $('speed-value').textContent = game.speed.toFixed(1);
-  $('multiplier').textContent = `×${game.multiplier}`;
-  $('combo-label').textContent = game.combo ? `${game.combo} record streak` : 'find your flow';
+  setText('score', game.score.toLocaleString());
+  setText('speed-value', game.speed.toFixed(1));
+  setText('multiplier', `×${game.multiplier}`);
+  setText('combo-label', game.combo ? `${game.combo} record streak` : 'find your flow');
   $('flow-progress').style.width = `${game.comboRemaining / 6 * 100}%`;
   $('flow-meter').setAttribute('aria-valuenow', game.comboRemaining.toFixed(1));
   const district = getDistrict(game.distance);
-  $('district-name').textContent = `${runMode === 'daily' ? 'DAILY / ' : ''}${district.name.toUpperCase()}`;
-  $('best-chase').textContent = best > 0
+  setText('district-name', `${runMode === 'daily' ? 'DAILY / ' : ''}${district.name.toUpperCase()}`);
+  setText('best-chase', best > 0
     ? game.distance > best ? 'Beyond your best' : `${Math.ceil(best - game.distance).toLocaleString()} m to your best`
-    : 'Make your first mark';
+    : 'Make your first mark');
 }
 function syncPowerups() {
   const names = { magnet: 'Magnet', shield: 'Shield', ghost: 'Ghost', spring: 'Super jump' };
   let active = false;
-  for (const [power, duration] of Object.entries(POWERUP_DURATIONS)) {
+  for (const entry of powerMeters) {
+    const { power, duration, meter, bar, label: countdown } = entry;
     const seconds = game.powerups[power] || 0;
-    const meter = $(`power-${power}`);
+    if (seconds > 0) active = true;
+    if (entry.remaining === seconds) continue;
+    entry.remaining = seconds;
     meter.classList.toggle('hidden', seconds <= 0);
-    meter.querySelector('.power-progress').style.width = `${Math.min(1, seconds / duration) * 100}%`;
+    bar.style.width = `${Math.min(1, seconds / duration) * 100}%`;
     meter.setAttribute('aria-valuenow', seconds.toFixed(1));
     meter.setAttribute('aria-valuemax', duration);
     if (seconds > 0) {
       active = true;
       const label = `${Math.ceil(seconds)}s`;
-      if (meter.querySelector('strong').textContent !== label || !meter.hasAttribute('aria-valuetext')) {
-        meter.querySelector('strong').textContent = label;
+      if (countdown.textContent !== label || !meter.hasAttribute('aria-valuetext')) {
+        countdown.textContent = label;
         meter.setAttribute('aria-valuetext', `${names[power]}: ${Math.ceil(seconds)} seconds remaining`);
       }
     }
@@ -137,7 +152,7 @@ function syncSurfboard() {
   button.disabled = game.state !== 'playing' || riding || !affordable;
   $('surf-control').classList.toggle('riding', riding);
   $('surf-control').classList.toggle('affordable', affordable && !riding);
-  $('surf-price').textContent = riding ? `${Math.ceil(game.surfRemaining)}s` : `${SURFBOARD_COST}`;
+  setText('surf-price', riding ? `${Math.ceil(game.surfRemaining)}s` : `${SURFBOARD_COST}`);
   const progress = riding ? game.surfRemaining / SURFBOARD_SECONDS : Math.min(1, game.coins / SURFBOARD_COST);
   $('surf-progress').style.width = `${progress * 100}%`;
   $('surf-meter').setAttribute('aria-label', riding ? 'Surfboard flight remaining' : 'Records toward a surfboard');
@@ -153,6 +168,7 @@ function syncSurfboard() {
 
 function start() {
   if (game.state === 'playing') return;
+  $('control-guide').open = false;
   if (game.state !== 'ready') saveRun();
   runBaseline = createProfile(profile);
   runSaved = false;
@@ -298,6 +314,8 @@ $('sound').addEventListener('click', async () => {
 const keyActions = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'jump', w: 'jump', W: 'jump', ' ': 'jump', ArrowDown: 'slide', s: 'slide', S: 'slide', b: 'surfboard', B: 'surfboard' };
 document.addEventListener('keydown', event => {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === 'Escape' && $('control-guide').open) { $('control-guide').open = false; return; }
+  if (event.key === ' ' && event.target.closest?.('summary')) return;
   if ($('logbook').open) return;
   if (event.key.toLowerCase() === 'f') { event.preventDefault(); if (!event.repeat) toggleFullscreen(); return; }
   if (event.key.toLowerCase() === 'r' && game.state === 'over') { event.preventDefault(); if (!event.repeat) start(); return; }
@@ -325,6 +343,7 @@ document.addEventListener('keydown', event => {
 
 let touchStart = null;
 $('world').addEventListener('pointerdown', event => {
+  $('control-guide').open = false;
   if (event.pointerType === 'mouse') return;
   touchStart = { x: event.clientX, y: event.clientY };
   $('world').setPointerCapture(event.pointerId);
@@ -365,9 +384,9 @@ function frame(now) {
       renderer.burst(event.type, game, event);
     }
     syncState();
-    $('distance').textContent = Math.floor(game.distance).toLocaleString();
-    $('coins').textContent = game.coins;
-    $('best').textContent = best.toLocaleString();
+    setText('distance', Math.floor(game.distance).toLocaleString());
+    setText('coins', game.coins);
+    setText('best', best.toLocaleString());
     syncRunHud();
     syncSurfboard();
     syncPowerups();

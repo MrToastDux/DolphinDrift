@@ -73,8 +73,11 @@ export class Renderer {
     this.width = bounds.width;
     this.height = bounds.height;
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    this.canvas.width = Math.round(this.width * dpr);
-    this.canvas.height = Math.round(this.height * dpr);
+    const pixelWidth = Math.round(this.width * dpr), pixelHeight = Math.round(this.height * dpr);
+    if (this.canvas.width === pixelWidth && this.canvas.height === pixelHeight && this.dpr === dpr) return;
+    this.dpr = dpr;
+    this.canvas.width = pixelWidth;
+    this.canvas.height = pixelHeight;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
@@ -228,7 +231,11 @@ export class Renderer {
     const from = DISTRICTS[district.index], to = DISTRICTS[(district.index + 1) % DISTRICTS.length];
     const fade = Math.max(0, (district.progress - .78) / .22);
     const blend = fade * fade * (3 - 2 * fade);
-    for (const key of Object.keys(from.colors)) this.palette[key] = mixColor(from.colors[key], to.colors[key], blend);
+    if (this.paletteIndex !== district.index || this.paletteBlend !== blend) {
+      for (const key of Object.keys(from.colors)) this.palette[key] = blend === 0 ? from.colors[key] : mixColor(from.colors[key], to.colors[key], blend);
+      this.paletteIndex = district.index;
+      this.paletteBlend = blend;
+    }
     this.night = lerp(from.night, to.night, blend);
     this.market = lerp(from.market, to.market, blend);
   }

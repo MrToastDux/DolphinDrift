@@ -579,7 +579,7 @@ test('speed rises with playing time, reaches a cap, and freezes or resets with t
   advance(game, 10);
   assert.deepEqual(game.snapshot(), paused);
   game.resume();
-  advance(game, 180);
+  advance(game, (MAX_SPEED - START_SPEED) / SPEED_GAIN);
   assert.equal(game.speed, MAX_SPEED);
   game.reset();
   assert.equal(game.speed, START_SPEED);

@@ -29,7 +29,7 @@ Powerups rotate through four types, with a pickup every **four obstacle rows** (
 
 Small progress bars on the left show active powerup time and surfboard savings or flight time. The surfboard control shows only its name, price, and progress. Gameplay has no popup messages or decorative cards. Sky records are only reachable on the surfboard, including with a magnet; ground records and powerups are collected on foot. Every record is worth one.
 
-Speed increases with active playing time, from **12 m/s** by **0.18 m/s each second**, up to **42 m/s** after about **2 minutes 47 seconds**. The live speed readout makes the ramp visible. Later obstacle rows preserve at least 1.25 seconds of reaction time; sky routes scale their spacing with speed. Pausing freezes speed progression and all gameplay timers.
+Speed increases with active playing time, from **12 m/s** by **0.18 m/s each second**, up to **100 m/s** after about **8 minutes 9 seconds**. The live speed readout makes the ramp visible. Later obstacle rows preserve at least 1.25 seconds of reaction time; sky routes scale their spacing with speed. Pausing freezes speed progression and all gameplay timers.
 
 ## New ways to drift
 
