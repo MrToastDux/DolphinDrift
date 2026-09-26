@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Boss combat & cosmetic checks</title>
+<style>body{font:14px system-ui;background:#f5f6ef;color:#214e48;margin:16px}li{margin:7px 0}iframe{width:100%;height:840px;border:1px solid #bdd0b5}.fail{color:#ac342d}</style>
+<h1>Boss combat & cosmetic checks</h1><p id="status">Running…</p><ol id="results"></ol><iframe id="game" src="../?debug" title="Boss combat and fitting-room test"></iframe>
+<script type="module">
+const frame=document.getElementById('game'),status=document.getElementById('status');
+const frames=async(n=6)=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+const assert=(v,m)=>{if(!v)throw Error(m);};let passed=0,current='Boot';
+const test=async(name,run)=>{current=name;await run();const row=document.createElement('li');row.textContent='PASS · '+name;document.getElementById('results').append(row);passed++;};
+try {
+  const start=performance.now();while(!frame.contentWindow?.__drift){assert(performance.now()-start<10000,'Game failed to boot');await frames(1);}
+  const child=frame.contentWindow,doc=frame.contentDocument,$=id=>doc.getElementById(id),debug=child.__drift,{game,renderer}=debug;
+  const errors=[];child.addEventListener('error',event=>errors.push(event.message));
+  const key=key=>doc.dispatchEvent(new child.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+  const clear=()=>{game.objects=[];game._nextRow=Infinity;};
+  const tick=n=>{for(let i=0;i<n;i++)game.update(.05);};
+  $('sound').click();$('sound').click();
+  await test('Q and the touch button fire real shots and update the boss armor display',async()=>{
+    $('mode-tour').click();$('start').click();clear();game.distance=530;game.update(.01);game.boss.cooldown=100;await frames();
+    assert(!$('counter').disabled,'Shot button not ready');key('q');assert(game.boss.shot>0,'Q did not fire');
+    tick(9);await frames();assert(Number($('boss-health').value)===3,'Armor did not update');
+    game.objects=[{id:999,type:'energy',lane:0,z:.01,bossStage:0}];game.update(.01);await frames();
+    $('counter').click();tick(9);await frames();assert(game.boss.hp===2,'Touch shot did not hit');
+    for(let i=0;i<2;i++){game.boss.charge=1;await frames();$('counter').click();tick(9);await frames();}
+    assert(game.boss.defeated&&game.bonusCredits===150,'Knockout reward missing');
+    assert($('tour-title').textContent.includes('defeated')&&$('counter').disabled,'Knockout UI missing');
+    $('pause').click();$('home').click();
+  });
+  await test('Try-on renders unowned looks without spending records or changing equipment',async()=>{
+    $('shop-open').click();const before=JSON.stringify(debug.profile),style=renderer.style;
+    const tryOn=[...$('shop-items').querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Try on Orca outlaw');
+    assert(tryOn,'New skin missing');tryOn.click();await frames();
+    assert(JSON.stringify(debug.profile)===before&&renderer.style===style,'Preview changed the save or runner');
+    assert($('preview-label').textContent==='Trying on: Orca outlaw','Preview label missing');
+  });
+  await test('All 20 additions are rendered through the real fitting room',async()=>{
+    const expected={Skins:['Orca outlaw','Koi club','Cosmic swimmer','Cyber circuit','Glacier glass','Dragonfruit'],Boards:['Pocket rocket','Manta cruiser','Bone rider','Prism drive'],Hats:['Captain Dub','Alien radio','Punk tide','Angel frequency','Reef raider','Jellyhead'],Trails:['Afterburner','Dub echoes','Sakura drift','Pixel leak']};
+    for(const [category,names] of Object.entries(expected)) {
+      [...$('shop-tabs').children].find(b=>b.textContent===category).click();
+      for(const name of names){const button=[...$('shop-items').querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===`Try on ${name}`);assert(button,`Missing ${name}`);button.click();await frames(3);}
+    }
+    assert(errors.length===0,errors.join('; '));
+  });
+  await test('Purchasing and equipping use the real wallet and apply the new mesh',async()=>{
+    [...$('shop-tabs').children].find(b=>b.textContent==='Hats').click();
+    const card=[...$('shop-items').children].find(item=>item.querySelector('h3').textContent==='Captain Dub');
+    const before=debug.profile.wallet;card.querySelector('button:last-child').click();
+    assert(debug.profile.wallet===before-220&&debug.profile.shop.owned.includes('hat-pirate'),'Purchase failed');
+    const bought=[...$('shop-items').children].find(item=>item.querySelector('h3').textContent==='Captain Dub');bought.querySelector('button:last-child').click();await frames();
+    assert(renderer.hat==='hat-pirate'&&debug.profile.shop.equipped.hat==='hat-pirate','Equip failed');
+    $('shop-close').click();$('shop-open').click();assert($('preview-label').textContent==='Your equipped look','Preview not reset on reopen');
+  });
+  await test('360px shop keeps preview, categories and purchase controls within the dialog',async()=>{
+    frame.style.width='360px';frame.style.height='820px';await frames(5);
+    const dialog=$('shop').getBoundingClientRect();assert(dialog.left>=0&&dialog.right<=360,'Dialog clipped');
+    for(const button of $('shop-items').querySelectorAll('button')){const r=button.getBoundingClientRect();assert(r.left>=dialog.left&&r.right<=dialog.right,'Shop button clipped');}
+    assert($('shop-preview').getBoundingClientRect().width>50,'Preview collapsed');
+    assert(errors.length===0,errors.join('; '));
+  });
+  status.textContent=`${passed} checks passed.`;
+}catch(error){status.className='fail';status.textContent=`FAIL · ${current}: ${error.message}`;console.error(error);}
+</script></html>

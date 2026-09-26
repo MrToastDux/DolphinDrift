@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D combat and mobile HUD checks</title>
+<style>body{font:14px system-ui;background:#f5f6ef;color:#214e48;margin:16px}li{margin:8px 0}iframe{width:390px;height:844px;border:0;border-radius:14px}.fail{color:#ac342d}</style>
+<h1>3D combat and mobile HUD checks</h1><p id="status">Running…</p><ol id="results"></ol>
+<iframe id="game" src="../?debug" title="Isolated combat test"></iframe>
+<script type="module">
+const frame=document.getElementById('game'),status=document.getElementById('status');
+const frames=async(n=6)=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+const assert=(value,message)=>{if(!value)throw Error(message);};
+let count=0,current='Boot';
+const test=async(name,run)=>{current=name;await run();const row=document.createElement('li');row.textContent='PASS · '+name;document.getElementById('results').append(row);count++;};
+try {
+  const start=performance.now();while(!frame.contentWindow?.__drift){assert(performance.now()-start<10000,'Game failed to boot');await frames(1);}
+  const child=frame.contentWindow,doc=frame.contentDocument,$=id=>doc.getElementById(id),debug=child.__drift,{game,renderer}=debug;
+  const errors=[];child.addEventListener('error',e=>errors.push(e.message));
+  $('mode-tour').click();$('start').click();
+  const update=game.update.bind(game);game.update=()=>{};
+  game.distance=2100;game.objects=[];game._nextRow=Infinity;game._updateBoss(0);
+  await test('Portrait banners use under 21% of the arena at 320, 360, 390 and 430 px',async()=>{
+    for(const [width,height] of [[320,568],[360,640],[390,844],[430,932]]) {
+      frame.style.width=width+'px';frame.style.height=height+'px';await frames(5);
+      const arena=$('world').getBoundingClientRect(),hud=doc.querySelector('.hud').getBoundingClientRect(),boss=$('tour-status').getBoundingClientRect();
+      assert((hud.height+boss.height)/arena.height<.21,`Banners too tall at ${width}`);
+      assert(arena.bottom<=height,`Arena extends below viewport at ${width}`);
+      assert(doc.documentElement.scrollWidth<=width,`Horizontal overflow at ${width}`);
+    }
+  });
+  await test('Touch buttons, Fire, Dash and Surfboard stay visible and do not overlap',async()=>{
+    frame.style.width='320px';frame.style.height='568px';debug.profile.options.touchControls=true;await frames(5);
+    const buttons=[$('counter'),$('dash'),$('surfboard'),...$('touch-controls').children].map(el=>el.getBoundingClientRect());
+    for(const b of buttons)assert(b.left>=0&&b.right<=320&&b.bottom<=568&&b.width>=36&&b.height>=36,'Button clipped or too small');
+    for(let i=0;i<buttons.length;i++)for(let j=i+1;j<buttons.length;j++){
+      const a=buttons[i],b=buttons[j];assert(!(Math.min(a.right,b.right)>Math.max(a.left,b.left)+1&&Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top)+1),'Controls overlap');
+    }
+    $('counter').click();assert(game.boss.shot>0,'Fire button did not launch a shot');
+    for(let i=0;i<9;i++)update(.05);await frames();assert($('boss-health').value===5,'Shot did not update six-segment armor');
+  });
+  await test('Overdrive fires locked plasma and offers a visible deflect window',async()=>{
+    game.distance=2160;game.objects=[];game.projectiles=[];game._updateBoss(0);
+    game.boss.cooldown=0;update(.01);await frames();
+    assert($('tour-detail').textContent.includes('Targeting'),'Target warning missing');
+    for(let i=0;i<14;i++)update(.05);await frames();
+    assert(game.projectiles.length===3,'Plasma fan missing');
+    assert(!game.objects.some(o=>o.type==='pulse'),'Lane walls remain');
+    assert($('boss-armor').textContent.includes('FURY'),'Phase readout missing');
+    while(game.incomingShot && game.incomingShot.travel-game.incomingShot.age>.35)update(.01);
+    game.boss.charge=1;await frames();
+    assert($('counter').classList.contains('deflect-ready'),'Deflect timing cue missing');
+    $('counter').click();update(.05);await frames();
+    assert(game.combat.deflections===1 && game.projectiles.length===0,'Deflection failed');
+    assert($('sonic-recharge').getBoundingClientRect().width>0,'Recharge meter missing');
+  });
+  await test('Reduced motion keeps every 3D boss visible and pause preserves combat state',async()=>{
+    renderer.reducedMotion=true;
+    for(let stage=0;stage<3;stage++){
+      game.distance=stage*750+600;game.objects=[];game._updateBoss(0);renderer.draw(game,0,0);
+      assert(renderer.bossRig.faces.length>100,'3D mesh missing');
+    }
+    game.pause();const snapshot=JSON.stringify(game.snapshot());update(.1);assert(JSON.stringify(game.snapshot())===snapshot,'Pause advanced combat');
+    assert(errors.length===0,errors.join('; '));
+  });
+  game.resume();debug.profile.options.touchControls=false;frame.style.width='390px';frame.style.height='844px';
+  status.textContent=`${count} checks passed.`;
+}catch(error){status.className='fail';status.textContent=`FAIL · ${current}: ${error.message}`;console.error(error);}
+</script></html>

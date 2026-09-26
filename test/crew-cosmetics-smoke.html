@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>Crew cosmetics checks</title>
+<style>body{font:14px system-ui;background:#edf1e5;color:#244943}#gallery{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}canvas{width:100%;height:280px}iframe{display:block;width:375px;height:820px;border:0}article{text-align:center}#status{padding:14px}</style>
+<h1>Crew cosmetics</h1><p id="status">Running…</p><div id="gallery"></div><iframe title="Isolated shop" src="/index.html?debug"></iframe>
+<script type="module">
+import {Game} from '/src/game.js';import {Renderer} from '/src/renderer.js';
+const status=document.querySelector('#status'),gallery=document.querySelector('#gallery');
+for(const [i,character] of ['dub','octo','shark','turtle'].entries()){
+ const article=document.createElement('article'),c=document.createElement('canvas');article.textContent=character;article.append(c);gallery.append(article);
+ const r=new Renderer(c),g=new Game();r.setQuality('low');r.camera=1;r.style=['skin-koi','skin-cosmic','skin-orca','skin-cyber'][i];r.hat=['hat-pirate','hat-halo','hat-crown','hat-sailor'][i];
+ g.character=character;g.state='over';g.completed=true;g.objects=[];r.draw(g,.1,0);
+}
+const f=document.querySelector('iframe');await new Promise(resolve=>{const timer=setInterval(()=>{if(f.contentWindow.__drift){clearInterval(timer);resolve();}},50);});
+const w=f.contentWindow,d=w.document,p=w.__drift.profile;w.addEventListener('error',e=>status.textContent='FAIL: '+e.message);
+try{
+ d.querySelector('#logbook-open').click();if(d.querySelector('#wardrobe'))throw Error('Wardrobe remains');d.querySelector('#logbook').close();
+ p.totalRecords=1000;p.xp=2000;p.loadout.character='turtle';p.mastery.turtle=40;p.loadout.outfit='mastery';p.shop.owned.push('skin-cyber','hat-sailor');
+ d.querySelector('#shop-open').click();
+ const skin=d.querySelector('[aria-label="Equip Cyber circuit"]');
+ if(!skin)throw Error('Skin control missing');skin.click();
+ if(p.loadout.outfit!=='classic')throw Error('Skin did not replace mastery outfit');
+ const earned=[...d.querySelectorAll('#shop-items article')].find(el=>el.textContent.includes('Coral club'));if(!earned)throw Error('Earned style missing from shop');
+ [...d.querySelectorAll('#shop-tabs button')].find(el=>el.textContent==='Hats').click();
+ d.querySelector('[aria-label="Equip Sailor cap"]').click();
+ if(p.shop.equipped.hat!=='hat-sailor')throw Error('Hat equip failed');
+ status.textContent='PASS: Logbook opens without wardrobe; earned skins are in Shop; skin replaces mastery; hat equips. Selected runner: Shelly.';
+}catch(e){status.textContent='FAIL: '+e.message;}
+</script>

@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Dolphin Drift render benchmark</title>
+<style>body{font:16px system-ui;background:#f5f6ef;color:#214e48}canvas{width:960px;height:540px;max-width:100%}pre{white-space:pre-wrap}</style>
+<h1>Render benchmark</h1><pre id="report">Warming up…</pre><canvas></canvas>
+<script type="module">
+import {Game} from '../src/game.js';import {Renderer} from '../src/renderer.js';
+const game=new Game({seed:77}),renderer=new Renderer(document.querySelector('canvas'));
+game.start();game.reviveGrace=999;renderer.camera=1;renderer.style='coral';
+const results={};
+for(const scene of ['running','crab','manta','kraken']) for(const quality of ['high','low']){
+  game.mode=scene==='running'?'endless':'tour';game.distance=scene==='running'?0:510+(['crab','manta','kraken'].indexOf(scene))*750;
+  game.objects=[];game._nextRow=game.distance+40;game._fillTrack();game._updateBoss(0);
+  if(renderer.setQuality) renderer.setQuality(quality);
+  const timings=[];
+  for(let i=0;i<100;i++){
+    const start=performance.now();game.update(1/60);renderer.draw(game,1/60,i/60);
+    const elapsed=performance.now()-start;if(i>=20)timings.push(elapsed);
+    if(i%10===0)await new Promise(requestAnimationFrame);
+  }
+  timings.sort((a,b)=>a-b);results[scene+' / '+quality]={medianMs:+timings[40].toFixed(2),p95Ms:+timings[76].toFixed(2),faces:scene==='running'?renderer.dolphinRig.faces.length:renderer.bossRig.faces.length};
+}
+document.getElementById('report').textContent=JSON.stringify(results,null,2);
+</script></html>

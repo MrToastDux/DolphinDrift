@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Boss & cosmetic gallery</title>
+<style>body{background:#101f2b;color:#f4efde;font:14px system-ui;padding:24px}h1{font-size:32px}h2{margin-top:40px}.bosses{display:grid;gap:20px}.looks{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:15px}figure{margin:0;background:#20323d;border:1px solid #48616a;border-radius:12px;overflow:hidden}figcaption{padding:14px;font-weight:600;letter-spacing:.5px}canvas{display:block;width:100%;height:310px}.bosses canvas{height:470px}.looks canvas{height:260px}</style>
+<h1>Neo Kingston: the heavy hitters</h1><p>Three new bosses. Twenty new looks. Canvas artwork from the playable game.</p><div class="bosses" id="bosses"></div><h2>The new collection</h2><div class="looks" id="looks"></div>
+<script type="module">
+import {Game} from '../src/game.js';import {Renderer} from '../src/renderer.js';import {SHOP_ITEMS} from '../src/catalog.js';import {TOUR_STAGES} from '../src/tour.js';
+const cards=[];
+function card(parent,name,setup){const figure=document.createElement('figure'),canvas=document.createElement('canvas'),caption=document.createElement('figcaption');caption.textContent=name;figure.append(canvas,caption);document.getElementById(parent).append(figure);const renderer=new Renderer(canvas);renderer.setQuality('high');renderer.camera=1;const game=new Game({mode:'tour',seed:2});game.state='playing';game.objects=[];setup(renderer,game);renderer.draw(game,0,0);cards.push({renderer,game});return{renderer,game};}
+TOUR_STAGES.forEach((stage,index)=>card('bosses',`${stage.boss} / ${stage.title}`,(r,g)=>{g.distance=index*750+600;g.speed=25;g._nextRow=g.distance+30;g._fillTrack();g._updateBoss(0);r.time=1.2;}));
+const additions=SHOP_ITEMS.slice(SHOP_ITEMS.findIndex(item=>item.id==='skin-orca'),SHOP_ITEMS.findIndex(item=>item.category==='upgrade'));
+for(const item of additions)card('looks',item.name,(r,g)=>{g.mode='endless';g.distance=0;r.camera=1;r.time=1.2;if(item.category==='skin')r.style=item.id;if(item.category==='hat')r.hat=item.id;if(item.category==='trail')r.trail=item.id;if(item.category==='board'){r.boardId=item.id;r.boardColor=item.color;g.surfRemaining=20;g.player.altitude=4.2;r.flightCamera=4.2;}});
+requestAnimationFrame(()=>{for(const {renderer,game} of cards){renderer.resize();renderer.draw(game,0,0);}});
+</script></html>

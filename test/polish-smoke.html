@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dolphin Drift · polish regression checks</title>
+<style>
+  body{font:14px/1.5 system-ui;margin:20px;background:#f5f6ef;color:#214e48}
+  iframe{display:block;border:1px solid #a8c5b4;width:100%;height:800px}
+  .fail{color:#a32d24;white-space:pre-wrap} li{margin:4px 0}
+</style>
+<h1>Polish regression checks</h1>
+<p>Real controls, isolated debug profile, no changes to saved progress.</p>
+<output id="status" role="status">Running…</output>
+<ol id="results"></ol>
+<iframe id="game" src="../?debug" title="Game under test"></iframe>
+<script type="module">
+const frame = document.getElementById('game'), results = document.getElementById('results'), status = document.getElementById('status');
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const until = async (check, message) => {
+  const started = performance.now();
+  while (!check()) { assert(performance.now()-started < 6000, message); await wait(25); }
+};
+let passed = 0, current = 'Boot';
+const test = async (name, run) => {
+  current = name; await run(); passed++;
+  const row = document.createElement('li'); row.textContent = `PASS · ${name}`; results.append(row);
+};
+try {
+  await until(() => frame.contentWindow?.__drift, 'Game failed to boot');
+  const child = frame.contentWindow, doc = frame.contentDocument, {game, audio} = child.__drift;
+  const $ = id => doc.getElementById(id), profile = () => child.__drift.profile;
+  const {finishRun, createProfile} = await import('../src/progression.js');
+  // Choose muted audio through the real control before running the test suite.
+  $('sound').click(); $('sound').click(); audio.disable();
+  const clear = () => { game.objects = []; game._nextRow = Infinity; };
+  const home = () => doc.querySelector('.brand').click();
+  const settle = async () => {
+    frame.scrollIntoView({block:'start'});
+    // Wait on the game's own frame loop; offscreen iframes may be throttled.
+    for (let i=0;i<3;i++) await new Promise(resolve => child.requestAnimationFrame(resolve));
+    await wait(70);
+    // Resizing across breakpoints can animate the intro transform for 450 ms.
+    // Measure its settled layout, not a transient position during that transition.
+    await Promise.all($('intro').getAnimations().map(animation => animation.finished.catch(() => {})));
+    await new Promise(resolve => child.requestAnimationFrame(resolve));
+  };
+  const key = value => doc.dispatchEvent(new child.KeyboardEvent('keydown', {key:value,bubbles:true,cancelable:true}));
+
+  await test('Home logo banks the run without reloading or counting it twice', async () => {
+    $('start').click(); clear(); game.update(.1);
+    game._collectCoin({id:900,type:'coin',lane:0,z:0}); $('pause').click();
+    const baseline = createProfile(profile()), expected = finishRun(baseline,game);
+    home(); await settle();
+    assert(game.state === 'ready' && child.__drift.game === game, 'Home must reset in place');
+    assert(profile().runs === baseline.runs+1 && profile().wallet === expected.wallet, 'Home must bank earned progress');
+    home(); assert(profile().runs === baseline.runs+1, 'Home counted the run twice');
+  });
+  await test('Pause freezes gameplay; dialogs and keyboard resume preserve the run', async () => {
+    $('start').click(); clear(); game.powerups.shield = 10; $('pause').click();
+    const before = JSON.stringify(game.snapshot());
+    $('logbook-open').click(); key('p'); await settle();
+    assert(JSON.stringify(game.snapshot()) === before, 'A dialog allowed gameplay to resume');
+    $('logbook-close').click(); key('p');
+    assert(game.state === 'playing', 'Pause shortcut did not resume');
+    home();
+  });
+  await test('Crash, revive, and home bank exactly one run', async () => {
+    const baseline = createProfile(profile());
+    $('start').click(); clear(); game.update(.1); game.stats.records = 90; game.coins = 90;
+    game.state = 'over'; await settle();
+    assert(profile().runs === baseline.runs+1, 'Crash was not saved');
+    $('revive').click(); clear();
+    assert(game.state === 'playing' && game.coins === 15, 'Revive failed');
+    game._collectCoin({id:901,type:'coin',lane:0,z:0}); $('pause').click();
+    const expected = finishRun(baseline,game); home();
+    assert(profile().runs === baseline.runs+1 && profile().wallet === expected.wallet && profile().xp === expected.xp, 'Revive double-counted or lost progress');
+  });
+  await test('Touch gestures ignore a second finger and cancel cleanly across pause', async () => {
+    $('start').click(); clear();
+    const world=$('world'), capture=world.setPointerCapture;
+    // Synthetic pointers have no native capture; keep the real event handlers.
+    world.setPointerCapture=()=>{};
+    const pointer=(type,id,x,y)=>world.dispatchEvent(new child.PointerEvent(type,{pointerId:id,pointerType:'touch',clientX:x,clientY:y,bubbles:true}));
+    try {
+      pointer('pointerdown',1,100,100); pointer('pointerdown',2,200,100);
+      pointer('pointerup',2,50,100); assert(game.player.lane===0,'Second finger moved the runner');
+      pointer('pointerup',1,200,100); assert(game.player.lane===1,'Primary swipe was lost');
+      pointer('pointerdown',3,100,100); $('pause').click(); $('resume').click();
+      pointer('pointerup',3,0,100); assert(game.player.lane===1,'Stale gesture survived pause');
+      pointer('pointerdown',4,100,100); pointer('pointercancel',4,100,100);
+      pointer('pointerup',4,0,100); assert(game.player.lane===1,'Cancelled gesture moved the runner');
+    } finally {world.setPointerCapture=capture;home();}
+  });
+  await test('Story retry immediately restarts the same chapter; completed chapters return to the map', async () => {
+    $('mode-story').click(); $('start').click(); $('chapter-launch').click(); clear(); game.update(.1);
+    game.state = 'over'; await settle();
+    assert($('resume').textContent.includes('Retry chapter'), 'Wrong retry label');
+    $('resume').click(); clear();
+    assert(game.state === 'playing' && game.chapterId === 'signal' && !$('adventure').open, 'Retry unexpectedly opened the map');
+    game.update(.1);
+    game.distance = 450; game.stats.records = 20; game.campaignEnded = true; game.completed = true; game.state = 'over'; await settle();
+    $('resume').click();
+    assert($('adventure').open && $('chapter-title').textContent === 'Market takeover', 'Completion did not advance the map');
+    $('adventure-close').click(); home();
+  });
+  await test('All four modes show the right controls and preserve pause/resume', async () => {
+    for (const mode of ['endless','daily','tour','story']) {
+      $('mode-'+mode).click(); $('start').click();
+      if (mode === 'story') $('chapter-launch').click();
+      clear(); await settle();
+      assert(game.mode === mode && game.state === 'playing', `Failed to start ${mode}`);
+      assert($('combat-action').classList.contains('hidden') === (mode !== 'story'), `Wrong combat controls in ${mode}`);
+      assert($('tour-status').classList.contains('hidden') === (mode !== 'tour'), `Wrong route panel in ${mode}`);
+      $('pause').click(); key('p'); assert(game.state === 'playing', `Cannot resume ${mode}`); home();
+    }
+  });
+  await test('Milestone HUD describes the next payout without claiming it is banked', async () => {
+    $('mode-endless').click(); $('start').click(); clear(); await settle();
+    assert($('mission-readout').textContent.includes('next +20') && !$('mission-readout').textContent.includes('banked'), 'Unearned milestone presented as banked');
+    game.distance = 1500; game.stats.records = 100; game.stats.stunts = 10; await settle();
+    assert($('mission-readout').textContent === 'All milestones reached · +300 banked', 'Completed milestone total incorrect');
+    home();
+  });
+  await test('Daily best chase uses today’s record and resets for a new date', async () => {
+    const { localDateKey } = await import('../src/progression.js');
+    profile().daily = { date: localDateKey(), bestDistance: 100, bestScore: 100 };
+    $('mode-daily').click(); $('start').click(); clear(); await settle();
+    assert($('best-chase').textContent === `${Math.ceil(100-game.distance)} m to your best`, 'Daily chased the career record');
+    game.distance = 101; await settle();
+    assert($('best-chase').textContent === 'Beyond your best', 'Daily did not recognize today’s best');
+    home(); profile().daily.date = '2000-01-01';
+    $('start').click(); clear(); await settle();
+    assert($('best-chase').textContent === 'Make your first mark', 'Old Daily record leaked into a fresh day');
+    home(); $('mode-endless').click();
+  });
+  const rect = id => $(id).getBoundingClientRect();
+  const overlaps = (a,b) => Math.min(a.right,b.right)>Math.max(a.left,b.left)+1 && Math.min(a.bottom,b.bottom)>Math.max(a.top,b.top)+1;
+  await test('Small phones and landscape keep the start button reachable without clipping', async () => {
+    for (const [width,height] of [[320,568],[390,844],[844,390]]) {
+      frame.style.width = width+'px'; frame.style.height = height+'px'; await settle();
+      const intro=rect('intro'), start=rect('start'), shell=rect('game-shell');
+      assert(doc.documentElement.scrollWidth <= width+1, `${width}×${height}: horizontal overflow`);
+      assert(start.left >= shell.left && start.right <= shell.right && start.bottom <= shell.bottom && intro.top >= shell.top, `${width}×${height}: title/start clipped`);
+    }
+  });
+  await test('Remix settings stay inside the scene on small phones and landscape', async () => {
+    for (const [width,height] of [[320,568],[390,844],[844,390]]) {
+      frame.style.width=width+'px'; frame.style.height=height+'px';
+      $('mode-endless').click(); $('run-kit').open=true; await settle();
+      const panel=$('run-kit').querySelector('div').getBoundingClientRect(), shell=rect('game-shell');
+      assert(panel.top>=shell.top && panel.bottom<=shell.bottom && panel.right<=shell.right, `${width}×${height}: remix settings clipped`);
+      $('run-kit').open=false;
+    }
+  });
+  await test('Long result dialogs scroll to their actions on phones and landscape', async () => {
+    for (const [width,height] of [[320,568],[844,390]]) {
+      frame.style.width=width+'px'; frame.style.height=height+'px';
+      $('start').click(); clear(); game.update(.1); game.coins=90; game.state='over'; await settle();
+      const modal=doc.querySelector('.modal'), shell=rect('game-shell'), bounds=modal.getBoundingClientRect();
+      assert(bounds.top>=shell.top && bounds.bottom<=shell.bottom, `${width}×${height}: result dialog clipped`);
+      modal.scrollTop=modal.scrollHeight;
+      assert(rect('home').bottom<=bounds.bottom, `${width}×${height}: home action unreachable`);
+      home();
+    }
+  });
+  await test('Story objectives, boss armor and action controls remain separate at every breakpoint', async () => {
+    for (const [width,height] of [[320,568],[390,844],[844,390],[1280,800]]) {
+      frame.style.width = width+'px'; frame.style.height = height+'px';
+      profile().story.cleared = 3;
+      $('mode-story').click(); $('start').click(); $('chapter-launch').click();
+      clear(); game.distance=520; game.update(.01); game.powerups = {magnet:10,shield:12,ghost:6,spring:12};
+      profile().options.touchControls = true; await settle();
+      const panels = ['story-status','tour-status','combat-action','touch-controls'];
+      for (const [i,id] of panels.entries()) for (const other of panels.slice(i+1)) assert(!overlaps(rect(id),rect(other)), `${width}×${height}: ${id} overlaps ${other}`);
+      const rail=doc.querySelector('.boost-rail').getBoundingClientRect();
+      for (const id of panels) assert(!overlaps(rail,rect(id)), `${width}×${height}: boost controls overlap ${id}`);
+      home();
+    }
+  });
+  await test('The final boss warning identifies the weapon actually in flight', async () => {
+    profile().story.cleared=5; $('mode-story').click(); $('start').click(); $('chapter-launch').click();
+    clear(); game.distance=1000; game.update(.01); game.boss.cooldown=100;
+    for (const [kind,name] of [['cannon','Bass cannon'],['missile','Twin missiles'],['plasma','Plasma fan']]) {
+      game.projectiles=[{kind,age:0,travel:5,targetX:1,targetY:.95,radius:.2}];
+      await settle(); assert($('tour-detail').textContent.includes(name), `Wrong warning for ${kind}`);
+    }
+    home();
+  });
+  frame.style.width='100%'; frame.style.height='800px'; $('mode-endless').click();
+  status.textContent=`PASS · All ${passed} polish checks passed.`;
+  status.dataset.state='passed';
+} catch(error) {
+  status.textContent=`FAIL · ${current} (${passed} earlier checks passed)`;
+  status.dataset.state='failed';
+  const row=document.createElement('li'); row.className='fail'; row.textContent=error.stack; results.append(row);
+}
+</script>
+</html>

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f5f6ef" />
+  <meta name="description" content="Meet the mellowest dolphin in Neo Kingston. An endless island runner with neon rails, golden records, and good vibrations." />
+  <title>Dolphin Drift — A little island escape</title>
+  <link rel="icon" type="image/svg+xml" href="public-icon.svg" />
+  <link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Dolphin Drift home"><svg viewBox="0 0 42 42" fill="none" aria-hidden="true"><path d="M4 26C8 12 21 9 28 18l9 1 2 5-13 1c-3 8-10 10-16 5l-6 7 1-11Z" fill="currentColor"/><path d="m16 14 3-9 7 9" fill="currentColor"/><circle cx="29" cy="21" r="1.4" fill="#f5f6ef"/></svg><span>dolphin<span class="brand-light">drift</span></span></a>
+      <div class="location"><span class="status-dot"></span> NEO KINGSTON <span class="location-year">/ 2086</span></div>
+      <div class="top-actions">
+        <details class="control-guide" id="control-guide">
+          <summary>Controls</summary>
+          <div class="control-guide-panel">
+            <span><kbd>←</kbd><kbd>→</kbd> Switch lanes</span>
+            <span><kbd>↑</kbd> Jump <kbd>↓</kbd> Roll</span>
+            <span><kbd>B</kbd> Surfboard <kbd>P</kbd> Pause</span>
+            <span><kbd>E</kbd> Dub dash · charge with 25 records</span>
+            <span><kbd>C</kbd> Character ability</span>
+            <span id="combat-guide" class="hidden"><kbd>Q</kbd> Fire · <kbd>X</kbd> Tidal blast · Story only</span>
+            <span class="touch-guide">Jump over or roll under hazards for stunt points and dash charge. Chain clean clears within 5 seconds.</span>
+            <span class="touch-guide">Swipe to move, jump or roll. Tap to jump.</span>
+          </div>
+        </details>
+        <button class="utility-button" id="shop-open" aria-haspopup="dialog">Shop</button>
+        <button class="utility-button" id="logbook-open" aria-haspopup="dialog" title="Missions, achievements and settings">Logbook</button>
+        <button class="sound-button" id="sound" aria-label="Turn on island radio" aria-pressed="false"><span class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="sound-label">Sound off</span></button>
+        <button class="icon-button" id="pause" aria-label="Pause game" disabled><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6v12M15 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></button>
+      </div>
+    </header>
+
+    <main class="game-shell" id="game-shell" data-state="ready">
+      <canvas id="world" tabindex="0" aria-label="Dolphin Drift. Use arrows or WASD to move, jump, and roll. On touchscreens, swipe to move or tap to jump. Collect Magnet, Shield, Ghost, and Super jump powerups. Spend 200 records on a 20-second flying surfboard with the button or B, then steer between lanes for sky records."></canvas>
+      <div class="scene-grain" aria-hidden="true"></div>
+
+      <div class="scene-label"><span class="scene-label-dot"></span><span>THE PALM LINE</span><span class="scene-label-divider"></span><span>27° & EASY</span></div>
+      <div class="hud" aria-label="Run statistics">
+        <div class="stat distance-stat"><span class="stat-label">DISTANCE</span><span class="stat-value"><span id="distance">0</span><small>m</small></span></div>
+        <div class="stat"><span class="stat-label">RECORDS</span><span class="stat-value"><span class="record-icon" aria-hidden="true"></span><span id="coins">0</span></span></div>
+        <div class="stat best-stat"><span class="stat-label">BEST RUN</span><span class="stat-value"><span id="best">0</span><small>m</small></span></div>
+        <div class="stat score-stat"><span class="stat-label">SCORE</span><span class="stat-value" id="score">0</span></div>
+      <div class="run-telemetry" aria-label="Speed and combo">
+        <span class="district-name" id="district-name">THE PALM LINE</span>
+        <div><strong id="speed-value">12.0</strong><span>m/s</span><span class="telemetry-divider">/</span><strong id="multiplier">×1</strong><span id="combo-label">find your flow</span></div>
+        <div class="flow-track" role="progressbar" id="flow-meter" aria-label="Record combo time remaining" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0"><i id="flow-progress"></i></div>
+        <span id="best-chase">A fresh start</span><span id="stunt-readout">Jump &amp; roll hazards for stunt chains</span><span id="mission-readout"></span>
+      </div>
+      </div>
+
+      <section class="intro" id="intro" aria-labelledby="intro-title">
+        <div class="eyebrow"><span></span> A LITTLE ISLAND ESCAPE</div>
+        <h1 id="intro-title">Less rush.<br>More <em>drift.</em></h1>
+        <p>A dolphin. A fresh pair of kicks.<br>One sweet reggae rhythm. Endless good vibrations.</p>
+        <div class="mode-picker" role="group" aria-label="Run mode"><button id="mode-endless" aria-pressed="true">Endless</button><button id="mode-daily" aria-pressed="false">Daily route</button><button id="mode-tour" aria-pressed="false">Island Tour</button><button id="mode-story" aria-pressed="false">Story ✦</button></div>
+        <span class="mode-note" id="mode-note">A fresh route. A little faster every second.</span>
+        <button class="crew-open" id="crew-open"><strong id="crew-open-label">Choose your runner</strong><span id="equipped-loadout">Dub · Echo pulse</span> ↗</button>
+        <span id="crew-goal" class="crew-goal"></span>
+        <details id="run-kit" class="run-kit"><summary>Remix this run <span id="kit-summary">Classic rules</span></summary><div><label>Modifier <select id="modifier-select"></select></label><p id="modifier-note"></p><label>Starter supply <select id="supply-select"></select></label><p>Upgrades apply automatically. Daily routes use classic rules and no shop gear.</p></div></details>
+        <button class="start-button" id="start">Let’s drift <span aria-hidden="true">↗</span></button>
+        <span class="start-hint">or press <kbd>SPACE</kbd> to find your flow</span>
+        <div class="intro-bottom"><span class="jamaica-flag" aria-label="Jamaican flag"></span><span>ISLAND SOUL. FUTURE FEET.</span></div>
+      </section>
+
+      <div class="character-label" id="character-label"><span class="label-line"></span><span>MEET DUB<span class="character-subtitle">Locally grown. Ocean roaming.</span></span></div>
+
+      <aside class="boost-rail" aria-label="Surfboard and active powerups">
+        <div class="ability-control"><button id="ability" class="surf-button" disabled><strong id="ability-name">Echo pulse · C</strong><span id="ability-label">READY</span></button><div class="meter-track"><i id="ability-progress"></i></div></div>
+        <div class="dash-control"><button id="dash" class="surf-button" disabled title="Collect 25 records, then press E for 3 seconds of protection and record attraction"><strong>Dub dash <kbd>E</kbd></strong><span id="dash-label">0 / 25</span></button><div class="meter-track"><i id="dash-progress"></i></div></div>
+        <div class="surf-control" id="surf-control">
+          <button id="surfboard" class="surf-button" disabled>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19C4 11 12 4 21 3c-1 9-8 17-16 17Z" stroke="currentColor" stroke-width="1.6"/><path d="M6 18 18 6" stroke="currentColor" stroke-width="1.3"/></svg>
+            <strong id="surf-title">Surfboard</strong>
+            <span id="surf-price">200</span><span class="surf-cost-record" aria-hidden="true">◉</span>
+          </button>
+          <div class="meter-track" id="surf-meter" role="progressbar" aria-label="Records toward a surfboard" aria-valuemin="0" aria-valuemax="200" aria-valuenow="0"><i id="surf-progress"></i></div>
+        </div>
+        <div class="powerups hidden" id="powerups" role="group" aria-label="Active powerups">
+          <div class="power-meter power-magnet hidden" id="power-magnet" role="progressbar" aria-label="Magnet remaining" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0" title="Magnet: attracts nearby records for 10 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4v7a6 6 0 0 0 12 0V4h-4v7a2 2 0 0 1-4 0V4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 7h4m4 0h4" stroke="currentColor" stroke-width="1.8"/></svg><span>Magnet</span><strong>10s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-shield hidden" id="power-shield" role="progressbar" aria-label="Shield remaining" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0" title="Shield: absorbs one hit within 12 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 3v5c0 4-6 8-6 8s-6-4-6-8V5Z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Shield</span><strong>12s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-ghost hidden" id="power-ghost" role="progressbar" aria-label="Ghost remaining" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0" title="Ghost: pass through obstacles for 6 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 17V8a6 6 0 0 1 12 0v9l-3-2-3 2-3-2Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 7v2m4-2v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Ghost</span><strong>6s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+          <div class="power-meter power-spring hidden" id="power-spring" role="progressbar" aria-label="Super jump remaining" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0" title="Super jump: jump high enough to clear green hurdles, carts, and trams for 12 seconds">
+            <div class="power-label"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5-5 5 5M10 2v8m-4 3 8 2-8 2 8 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Super jump</span><strong>12s</strong></div>
+            <div class="meter-track" aria-hidden="true"><i class="power-progress"></i></div>
+          </div>
+        </div>
+      </aside>
+      <section id="story-status" class="story-status hidden" aria-label="Chapter objective"><strong id="story-title"></strong><span id="story-objective"></span><progress id="story-progress" value="0" max="450" aria-label="Chapter distance"></progress><p id="story-radio"></p></section>
+      <div id="bonus-status" class="bonus-status hidden"><strong id="bonus-name"></strong><span id="bonus-detail"></span><progress id="bonus-progress" max="180" value="0" aria-label="Bonus section progress"></progress></div>
+      <section id="tour-status" class="tour-status hidden" aria-label="Route progress"><span id="tour-kicker" class="tour-kicker">ISLAND TOUR / THREE DISTRICTS</span><strong id="tour-title"></strong><span id="tour-detail"></span><progress id="tour-progress" max="750" value="0" aria-label="District progress"></progress><span id="tour-reward"></span><div id="boss-fight" class="boss-fight hidden"><div><span id="boss-armor">ARMOR</span><progress id="boss-health" max="4" value="4" aria-label="Boss armor"></progress></div></div></section>
+      <div id="combat-action" class="combat-action hidden"><span id="sonic-hint">Q / Fire · auto recharge</span><progress id="sonic-recharge" max="3.5" value="0" aria-label="Sonic energy recharge"></progress><button id="counter" type="button" title="Q fires your weapon. During boss fights, fire when an incoming round turns mint to deflect it." aria-label="Fire sonic shot">Fire · Q</button><button id="special" type="button" disabled title="Charge with records and defeated enemies. X releases a wave that clears enemy fire and deals heavy damage.">Tidal blast · 0%</button></div>
+      <nav id="touch-controls" class="touch-controls hidden" aria-label="Touch movement controls"><button data-action="left" aria-label="Move left">←</button><button data-action="slide" aria-label="Roll">↓</button><button data-action="jump" aria-label="Jump">↑</button><button data-action="right" aria-label="Move right">→</button></nav>
+
+      <div class="overlay hidden" id="overlay">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <span class="modal-eyebrow" id="modal-eyebrow">TAKE A BREATHER</span>
+          <h2 id="modal-title">On island time.</h2>
+          <p id="modal-description">Your next good wave can wait.</p>
+          <div class="results hidden" id="results"><div><strong id="result-distance">0</strong><span>METERS DRIFTED</span></div><div><strong id="result-coins">0</strong><span>RECORDS BANKED</span></div></div>
+          <div id="run-summary" class="run-summary hidden"></div>
+          <p id="xp-earned" class="reward-line hidden"></p>
+          <section id="reward-receipt" class="reward-receipt hidden" aria-label="Banked reward breakdown">
+            <dl id="reward-breakdown"></dl>
+            <p id="reward-wallet"></p><p id="reward-next"></p>
+          </section>
+          <ul id="mission-list" class="mission-list" aria-label="This run's missions"></ul>
+          <p id="unlocked" class="unlocked hidden" role="status"></p>
+          <button class="revive-button hidden" id="revive">Catch one more wave · 75 records</button>
+          <button class="start-button" id="resume">Keep drifting <span aria-hidden="true">↗</span></button>
+          <button class="text-button" id="home">Back to the island</button>
+        </section>
+      </div>
+
+    </main>
+
+    <dialog id="adventure" class="adventure" aria-labelledby="adventure-title">
+      <div class="adventure-heading"><div><span class="eyebrow">A DOLPHIN DRIFT ADVENTURE</span><h2 id="adventure-title">Bring back the beat.</h2><p id="campaign-progress">0 / 6 chapters restored</p></div><button id="adventure-close" class="icon-button" aria-label="Close island map">×</button></div>
+      <div class="campaign-layout">
+        <div class="island-map" aria-label="Island chapter map">
+          <svg viewBox="0 0 700 340" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id="map-waves" width="50" height="40" patternUnits="userSpaceOnUse"><path d="M5 20q10-6 20 0t20 0" fill="none" stroke="#a7d4c0" opacity=".3"/></pattern></defs><path fill="url(#map-waves)" d="M0 0h700v340H0z"/><path d="M35 229Q40 126 136 97T298 119Q332 55 427 71T567 58Q666 31 678 104T610 233Q524 299 450 257T306 287Q230 264 169 295T35 229Z" fill="#528a77" stroke="#bcd8a4" stroke-width="8"/><path d="M65 219Q147 158 194 125T308 214Q372 177 420 124T531 196Q577 182 616 82" fill="none" stroke="#f7e5ad" stroke-width="3" stroke-dasharray="6 9"/><path d="m357 108 16-27 19 29m157 6 16-34 21 29m-441 96 18-26 16 19" fill="none" stroke="#91b88b" stroke-width="8"/><text x="31" y="37" fill="#d5e7ce" font-family="sans-serif" font-size="10" letter-spacing="4">NEO KINGSTON / 2086</text><text x="468" y="313" fill="#b8d7c4" font-family="serif" font-size="19" font-style="italic">The island is listening.</text></svg>
+          <div id="island-nodes"></div>
+        </div>
+        <section class="chapter-brief" aria-labelledby="chapter-title"><span id="chapter-number" class="eyebrow"></span><h3 id="chapter-title"></h3><span id="chapter-speaker"></span><p id="chapter-dialogue"></p><strong id="chapter-objective"></strong><small id="chapter-unlock"></small><button id="chapter-launch" class="start-button">Start chapter ↗</button></section>
+      </div>
+      <details id="crew-details" class="crew-details"><summary>Your crew &amp; armory <span>Choose your runner · prepare for Story combat</span></summary><div id="crew-cards" class="crew-cards"></div><h3>Sonic weapons <span class="section-hint">Story mode only</span></h3><div id="weapon-cards" class="weapon-cards"></div><p class="crew-help">Collect 100 / 300 / 600 lifetime records to unlock Inky / Riff / Shelly for free, or meet them in Story. Records you spend still count. Story chapters unlock weapons. C uses your ability; Story adds Q to fire and X for Tidal blast. Daily always uses Dub with base durations and no supplies. Skins, hats, boards and trails work for the whole crew. Choose your look in the Shop.</p></details>
+    </dialog>
+    <dialog id="shop" class="shop" aria-labelledby="shop-title">
+      <div class="shop-heading"><div><span class="eyebrow">THE ISLAND EXCHANGE</span><h2 id="shop-title">Dub’s corner store.</h2></div><button id="shop-close" class="icon-button" aria-label="Close shop">×</button></div>
+      <div class="shop-layout"><aside class="fitting-room"><div class="wallet"><span>BANKED RECORDS</span><strong>◉ <span id="shop-wallet">250</span></strong></div><canvas id="shop-preview" aria-label="Preview of your selected crew member, skin, hat, board and trail"></canvas><p id="preview-label" class="preview-label">Your equipped look</p><button id="preview-pose" class="utility-button">Preview board</button><p id="equipped-summary"></p><button id="shop-reset" class="utility-button">Wear the original look</button><p>250 welcome records, plus credit for your past collection. Bank records and mission rewards by finishing a run or returning home. In-run flight purchases use your separate run balance.</p></aside>
+      <section class="store-shelves"><div id="shop-tabs" class="shop-tabs" role="group" aria-label="Shop categories"></div><p id="shop-availability"></p><div id="shop-items" class="shop-items"></div></section></div><p id="shop-status" class="shop-status" role="status">Pick something for your next drift.</p>
+    </dialog>
+    <dialog id="logbook" class="logbook" aria-labelledby="logbook-title">
+      <div class="logbook-heading"><div><span class="eyebrow">YOUR ISLAND STORY</span><h2 id="logbook-title">The logbook.</h2></div><button id="logbook-close" class="icon-button" aria-label="Close logbook">×</button></div>
+      <div id="career-stats" class="career-stats"></div>
+      <section class="level-card" aria-label="Career level"><div><strong id="level-label">Level 1 · Beach newcomer</strong><span id="xp-label">0 / 250 XP</span></div><progress id="xp-progress" max="250" value="0" aria-label="XP to next level"></progress><p>Earn 1 XP per 10 m, 2 per record, and 50 per run milestone. Each goal has three milestones paying 20, 30 and 50 banked records. Crashes keep your rewards.</p></section>
+      <section class="tour-passport"><h3>Your island passport</h3><p id="tour-passport"></p><div id="tour-stamps"></div><p>Run 2,250 m through Palm Line, Sunset Market and Neon Harbour. Each checkpoint stamps your passport and awards records: 60, 90 and 150. Dodge obstacles, collect records, and reach the finish.</p></section>
+      <h3>Island contracts <span class="section-hint">Progress across runs · automatic rewards when you bank a run</span></h3><div id="contracts" class="contracts"></div>
+      <details class="logbook-section"><summary>Recent drifts & mode records</summary><div id="mode-records" class="mode-records"></div><ol id="run-history" class="run-history"></ol></details>
+      <h3>Little milestones</h3><div id="achievements" class="achievements"></div>
+      <div class="preferences"><label><input type="checkbox" id="reduced-motion"> Less motion & effects</label><button id="fullscreen" class="utility-button">Full screen ↗</button></div>
+      <div class="audio-settings"><label for="music-volume">Music <input id="music-volume" type="range" min="0" max="100" value="75"></label><label for="effects-volume">Effects <input id="effects-volume" type="range" min="0" max="100" value="75"></label></div>
+      <div class="preferences"><label for="render-quality">Graphics <select id="render-quality"><option value="auto">Auto · adapt for smooth play</option><option value="high">High detail</option><option value="low">Performance</option></select></label><span id="quality-status"></span></div>
+      <div class="preferences"><label><input type="checkbox" id="show-touch"> Show touch buttons</label><button id="postcard" class="utility-button">Save postcard ↓</button></div><p id="postcard-status" class="logbook-help" role="status"></p>
+      <p class="logbook-help">Keep collecting within 6 seconds to build a combo. Every 12 records raises your score multiplier, up to ×5. Close dodges earn bonus points. Records still spend one for one.</p>
+      <p class="logbook-help">Arrows / WASD to steer, jump and roll · B for flight · C for your character ability · E for dash · P to pause · R to retry · F for full screen. Story adds Q to fire and X for Tidal blast. Dash attracts records and protects you for 3 seconds. Progress stays in this browser.</p>
+    </dialog>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
+

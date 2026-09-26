@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dolphin Drift · Island Tour checks</title>
+<style>body{font:14px system-ui;background:#f5f6ef;color:#214e48;margin:16px}li{margin:6px 0}iframe{display:block;width:100%;height:790px;border:1px solid #b5cdb3;margin-top:16px}button{padding:9px;margin:3px;border:1px solid #a1b8a5;border-radius:6px;background:#e6ecd9;color:#214e48}#status{font-weight:bold}.fail{color:#ac342d}</style>
+<h1>Island Tour checks</h1><p id="status">Running…</p><ol id="results"></ol>
+<div id="previews" hidden><button id="palm">Palm boss</button><button id="market">Market boss</button><button id="harbour">Harbour boss</button><button id="mobile">Mobile preview</button><button id="desktop">Desktop preview</button><button id="title">Title screen</button></div>
+<iframe id="game" src="../?debug" title="Isolated Island Tour test game"></iframe>
+<script type="module">
+const iframe=document.getElementById('game'), status=document.getElementById('status');
+const frames=async(count=6)=>{for(let i=0;i<count;i++)await new Promise(requestAnimationFrame);};
+const assert=(value,message)=>{if(!value)throw Error(message);};
+let passed=0,current='Boot';
+const test=async(name,fn)=>{current=name;await fn();const li=document.createElement('li');li.textContent='PASS · '+name;document.getElementById('results').append(li);passed++;};
+try{
+  const began=performance.now();
+  while(!iframe.contentWindow?.__drift){assert(performance.now()-began<10000,'Game failed to boot');await frames(1);}
+  const child=iframe.contentWindow, doc=iframe.contentDocument, $=id=>doc.getElementById(id);
+  const {game,renderer}=child.__drift;
+  const clear=()=>{game.objects=[];game._nextRow=Infinity;};
+  const home=()=>{if(game.state==='playing')$('pause').click();$('home').click();};
+  $('sound').click();$('sound').click();
+  await test('Island Tour is selectable and has its own live progress display',async()=>{
+    $('mode-tour').click();$('start').click();clear();await frames();
+    assert(game.mode==='tour','Wrong mode');assert(!$('tour-status').classList.contains('hidden'),'Tour HUD missing');
+    assert($('tour-title').textContent.includes('1 / 3'),'Stage count missing');
+  });
+  await test('Boss warnings and pause preserve a live encounter',async()=>{
+    game.distance=1370;game.tourCleared=1;game._nextRow=1380;game._fillTrack();await frames();
+    assert($('tour-title').textContent==='Scarlet Manta','Boss title missing');
+    game.boss.cooldown=0;game.update(.01);await frames();
+    assert(game.boss.aiming && $('tour-detail').textContent.includes('Targeting'),'Aimed shot warning missing');
+    $('pause').click();const before=JSON.stringify(game.snapshot());await frames(8);
+    assert(JSON.stringify(game.snapshot())===before,'Paused boss changed');$('resume').click();clear();
+  });
+  await test('Finishing a Tour banks rewards, stamps and an isolated mode record',async()=>{
+    game.tourCleared=0;game.distance=2249.99;game.update(.02);await frames();
+    assert(game.completed&&game.distance===2250,'Tour did not finish');
+    assert($('modal-title').textContent==='Island Tour complete.','Wrong ending');
+    assert(child.__drift.profile.tourWins===1&&child.__drift.profile.tourStamps===3,'Passport not saved');
+    assert(child.__drift.profile.modeBests.tour>0&&child.__drift.profile.bestScore===0,'Mode records leaked');
+    assert($('revive').classList.contains('hidden'),'Completed Tour can revive');
+    $('home').click();
+  });
+  await test('A real jump clear updates stunt HUD, charge and persistent contract progress',async()=>{
+    $('mode-endless').click();$('start').click();clear();game.action('jump');
+    for(let i=0;i<8;i++)game.update(.05);
+    game.objects=[{id:998,type:'crate',lane:0,z:.01}];game.update(.01);await frames();
+    assert(game.stats.stunts===1&&game.dashCharge===3,'Stunt was not rewarded');
+    assert($('stunt-readout').textContent.includes('Clean vault'),'Stunt feedback missing');
+    home();assert(child.__drift.profile.contracts.stunts.progress===1,'Stunt contract did not bank');
+  });
+  await test('Logbook renders three contracts, passport stamps and all six mode records',async()=>{
+    $('logbook-open').click();await frames();
+    assert($('contracts').children.length===3,'Contract cards missing');
+    assert($('tour-stamps').querySelectorAll('.earned').length===3,'Stamps missing');
+    assert($('mode-records').children.length===6,'Tour score missing');
+    assert($('tour-passport').textContent.includes('1 tours completed'),'Win count missing');
+    $('logbook-close').click();
+  });
+  await test('320px title screen keeps all mode and start controls within the game',async()=>{
+    iframe.style.width='320px';iframe.style.height='740px';await frames(5);
+    const shell=$('game-shell').getBoundingClientRect(), start=$('start').getBoundingClientRect();
+    for(const button of doc.querySelectorAll('.mode-picker button')){
+      const rect=button.getBoundingClientRect();assert(rect.left>=0&&rect.right<=320,'Mode clipped');
+    }
+    assert(start.bottom<shell.bottom,'Start below playable area');
+    assert(doc.documentElement.scrollWidth<=320,'Horizontal page overflow');
+  });
+  status.textContent=`${passed} checks passed. Boss previews below use a frozen test run.`;
+  const realUpdate=game.update;
+  const preview=index=>{
+    game.update=realUpdate; if(game.state!=='ready')home(); $('mode-tour').click();$('start').click();
+    game.distance=index*750+640;game.tourCleared=index;game.elapsedTime=60;game.speed=26;
+    game.objects=[];game._nextRow=index*750+655;game._fillTrack();game._updateBoss(0);renderer.camera=1;
+    game.update=()=>{};
+  };
+  document.getElementById('previews').hidden=false;
+  ['palm','market','harbour'].forEach((id,index)=>document.getElementById(id).onclick=()=>preview(index));
+  document.getElementById('mobile').onclick=()=>{iframe.style.width='360px';iframe.style.height='780px';};
+  document.getElementById('desktop').onclick=()=>{iframe.style.width='100%';iframe.style.height='790px';};
+  document.getElementById('title').onclick=()=>{game.update=realUpdate;home();};
+  iframe.style.width='100%';iframe.style.height='790px';preview(2);
+}catch(error){status.textContent=`FAIL · ${current}: ${error.message}`;status.className='fail';console.error(error);}
+</script></html>

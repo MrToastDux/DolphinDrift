@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dolphin Drift · arcade checks</title>
+<style>body{font:14px system-ui;background:#f5f6ef;color:#214e48;margin:20px}li{margin:8px 0}iframe{width:100%;height:760px;border:1px solid #b5cdb3}#status{font-weight:bold}.fail{color:#ac342d}</style>
+<h1>Island arcade checks</h1><p id="status">Running…</p><ol id="results"></ol><iframe id="game" src="../?debug" title="Isolated arcade test game"></iframe>
+<script type="module">
+const iframe = document.getElementById('game'), status = document.getElementById('status');
+const frames = async (count = 2) => { for(let i=0;i<count;i++) await new Promise(requestAnimationFrame); };
+const assert = (value, message) => { if(!value) throw Error(message); };
+let passed = 0, current = 'Boot';
+const test = async (name, fn) => { current=name; await fn(); const li=document.createElement('li');li.textContent='PASS · '+name;document.getElementById('results').append(li);passed++; };
+try {
+  const started = performance.now();
+  while(!iframe.contentWindow?.__drift) { assert(performance.now()-started < 10000,'Game did not boot');await frames(1); }
+  const child=iframe.contentWindow, doc=iframe.contentDocument, $=id=>doc.getElementById(id);
+  const {game,renderer,audio}=child.__drift, profile=()=>child.__drift.profile;
+  $('sound').click(); $('sound').click(); await frames();
+  const clear = () => { game.objects=[];game._nextRow=Infinity; };
+  const key = key => doc.dispatchEvent(new child.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+  await test('All five modes are selectable and Zen survives real hazards', async()=>{
+    for(const mode of ['endless','daily','zen','sprint','hardcore']) assert($('mode-'+mode),'Missing mode '+mode);
+    $('mode-zen').click();$('start').click();clear();
+    game.objects=[{id:900,type:'tram',lane:0,z:.01}];game.update(.02);await frames();
+    assert(game.mode==='zen' && game.state==='playing' && game.speed===14,'Zen rules not active');
+  });
+  await test('Dash keyboard activates a charged ability and the HUD counts down',async()=>{
+    clear();game.objects=Array.from({length:25},(_,id)=>({id,type:'coin',lane:0,z:.01}));game.update(.01);clear();await frames();
+    assert(!$('dash').disabled && $('dash-label').textContent==='READY','Dash not ready');
+    key('e');await frames();assert(game.dashRemaining>2 && $('dash-label').textContent.endsWith('s'),'Dash did not activate');
+    assert(game.coins===25,'Dash spent currency');
+  });
+  await test('Logbook settings update audio gains and expose usable touch controls',async()=>{
+    $('logbook-open').click(); assert(game.state==='paused','Logbook must pause');
+    $('show-touch').click();$('music-volume').value=30;$('music-volume').dispatchEvent(new child.Event('input'));
+    $('effects-volume').value=40;$('effects-volume').dispatchEvent(new child.Event('input'));
+    assert(audio.musicVolume===.3 && audio.effectsVolume===.4,'Volume not applied');
+    $('logbook-close').click();$('resume').click();clear();await frames();
+    assert(!$('touch-controls').classList.contains('hidden'),'Touch controls hidden');
+    $('touch-controls').querySelector('[data-action="right"]').click();assert(game.player.lane===1,'Touch lane input failed');
+    $('touch-controls').querySelector('[data-action="jump"]').click();assert(game.player.jump>0,'Touch jump failed');
+  });
+  await test('Returning home banks one run, awards XP and unlocks cosmetics',async()=>{
+    game.distance=800;game.stats.records=50;game.stats.nearMisses=5;
+    $('pause').click();$('home').click();
+    assert(profile().runs===1 && profile().xp===405,'XP not banked exactly once');
+    assert(profile().bestDistance===0,'Zen overwrote standard best');
+    $('logbook-open').click();
+    assert(!$('wardrobe'),'Wardrobe should not be in the Logbook');
+    assert($('run-history').children.length===1 && $('level-label').textContent.startsWith('Level 2'),'History or level missing');
+    $('logbook-close').click();
+    $('shop-open').click();
+    const coral=doc.querySelector('[aria-label="Equip Coral club"]');
+    const lagoon=doc.querySelector('[aria-label="Level 3 Blue lagoon"]');
+    assert(coral && !coral.disabled && lagoon?.disabled,'Wrong unlock thresholds');
+    coral.click();assert(renderer.style==='coral' && profile().options.style==='coral','Equip failed');
+    $('shop-close').click();
+  });
+  await test('Sprint timer ends the run, saves its score, and offers no revive',async()=>{
+    $('mode-sprint').click();$('start').click();clear();await frames();
+    assert(!$('run-clock').classList.contains('hidden'),'No Sprint clock');
+    game.coins=100;game.elapsedTime=89.99;game.update(.05);await frames();
+    assert(game.completed && game.state==='over','Sprint never finished');
+    assert($('modal-title').textContent==='Sprint complete.','Wrong finish title');
+    assert($('revive').classList.contains('hidden'),'Completed sprint can revive');
+    assert(profile().history[0].mode==='sprint' && profile().runs===2,'Sprint saved incorrectly');
+    assert(profile().options.style==='coral' && profile().options.musicVolume===.3,'Settings lost on finish');
+    $('home').click();
+  });
+  await test('Hardcore launches fast and rejects a funded revive through the UI',async()=>{
+    $('mode-hardcore').click();$('start').click();clear();
+    assert(game.speed>=24 && game.multiplier===2,'Hardcore not applied');
+    game.coins=100;game.objects=[{id:800,type:'tram',lane:0,z:.01}];game.update(.02);await frames();
+    assert(game.state==='over' && $('revive').classList.contains('hidden'),'Hardcore revive exposed');
+    $('home').click();
+  });
+  await test('320px and 390px ready screens fit all modes and the start button',async()=>{
+    for(const width of [320,390]){
+      iframe.style.width=width+'px';iframe.style.height='640px';await frames(4);
+      assert(doc.documentElement.scrollWidth<=width,'Horizontal overflow');
+      const shell=$('game-shell').getBoundingClientRect(),start=$('start').getBoundingClientRect(),picker=$('mode-hardcore').getBoundingClientRect();
+      assert(start.bottom<shell.bottom && picker.right<=shell.right,'Start or modes clipped');
+      $('logbook-open').click();await frames();
+      assert($('logbook').getBoundingClientRect().right<=width,'Logbook clipped');
+      $('logbook-close').click();
+    }
+    iframe.style.width='100%';iframe.style.height='760px';await frames();
+  });
+  status.textContent=`PASS · All ${passed} arcade browser checks passed.`;
+  $('logbook-open').click();
+} catch(error) { status.className='fail';status.textContent=`FAIL · ${current}: ${error.message}`;console.error(error); }
+</script></html>

@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>Additions visual checks</title>
+<style>body{font:14px system-ui;background:#132b35;color:#e2f5e8;margin:20px}button{padding:10px;margin:4px}iframe{display:block;width:100%;height:800px;border:0}#status{padding:12px;color:#b8ffca}</style>
+<h1>Routes, mastery and celebrations</h1><p id="status">Loading isolated game…</p>
+<button id="reef">Reef tunnel</button><button id="roof">Market rooftops</button><button id="dock">Cargo docks</button><button id="fork">Fork prompt</button><button id="crew">Mastery crew</button><button id="victory">Victory</button><button id="phone">Phone / desktop</button>
+<iframe src="/index.html?debug" title="Isolated game"></iframe>
+<script type="module">
+const frame=document.querySelector('iframe'),status=document.querySelector('#status');
+const ready=()=>new Promise(resolve=>{const id=setInterval(()=>{if(frame.contentWindow.__drift){clearInterval(id);resolve();}},50);});
+await ready();const w=frame.contentWindow,d=w.document,{game:g,renderer:r,audio:a}=w.__drift;
+const start=()=>{d.querySelectorAll('dialog[open]').forEach(el=>el.close());g.state='ready';d.querySelector('#start').click();g.objects=[];g._nextRow=Infinity;g.reviveGrace=999;};
+function showRoute(index){start();g.distance=index*750+335;g.forkIndex=index;g.routeChoices.set(index,true);g._nextRow=g.distance+35;g._fillTrack();g.combo=48;}
+document.querySelector('#reef').onclick=()=>showRoute(0);
+document.querySelector('#roof').onclick=()=>showRoute(1);
+document.querySelector('#dock').onclick=()=>showRoute(2);
+document.querySelector('#fork').onclick=()=>{start();g.distance=130;};
+document.querySelector('#crew').onclick=()=>{g.state='ready';Object.assign(w.__drift.profile.mastery,{dub:150,octo:100,shark:40,turtle:40});w.__drift.profile.totalRecords=1000;d.querySelector('#crew-open').click();};
+document.querySelector('#victory').onclick=()=>{start();g.mode='tour';g.character=['dub','octo','shark','turtle'][Number(document.querySelector('#victory').dataset.index||0)%4];document.querySelector('#victory').dataset.index=Number(document.querySelector('#victory').dataset.index||0)+1;g.distance=2249.99;g.tourCleared=2;};
+document.querySelector('#phone').onclick=()=>{frame.style.width=frame.style.width==='375px'?'100%':'375px';};
+let errors=[];w.addEventListener('error',e=>{errors.push(e.message);status.textContent='FAIL: '+errors.join('; ');});
+try{
+ start();g.personalBest=.1;g.update(.1);
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ if(!d.querySelector('.celebration').textContent.includes('record'))throw Error('Missing milestone message');
+ if(d.documentElement.scrollWidth>d.documentElement.clientWidth+2)throw Error('Horizontal overflow');
+ a.setIntensity({state:'playing',combo:48,boss:{defeated:false}});if(a.intensity!==4||!a.bossMusic)throw Error('Reactive music state');
+ showRoute(0);status.textContent='PASS: app loads, milestone message, music state and layout. Use buttons for visual checks.';
+}catch(e){status.textContent='FAIL: '+e.message;}
+</script>
+

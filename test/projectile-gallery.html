@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aimed boss weapons</title>
+<style>body{margin:24px;background:#102734;color:#f7eed6;font:14px system-ui}h1{font-size:25px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}figure{margin:0;border:1px solid #52716e;border-radius:12px;overflow:hidden}canvas{display:block;width:100%;height:540px}figcaption{padding:14px}strong{display:block;margin-bottom:6px}</style>
+<h1>Aimed boss weapons</h1><p>Frozen scenes from the game renderer. Shots leave the boss and travel toward a locked target.</p><div class="grid"></div>
+<script type="module">
+import {Game} from '../src/game.js';import {Renderer} from '../src/renderer.js';import {bossVolley} from '../src/tour.js';
+const labels=['Clawbreaker · Bass cannon','Scarlet Manta · Twin missiles','Volt Kraken · Plasma fan'];
+for(let i=0;i<3;i++) {
+  const figure=document.createElement('figure'),canvas=document.createElement('canvas'),caption=document.createElement('figcaption');
+  caption.innerHTML=`<strong>${labels[i]}</strong>Lock, launch, dodge. Q / Fire to deflect at the last moment.`;figure.append(canvas,caption);document.querySelector('.grid').append(figure);
+  const game=new Game({mode:'tour',seed:2});game.start();game.distance=750*i+580;game.objects=[];game._nextRow=Infinity;game._updateBoss(0);
+  game.boss.cooldown=0;game._updateBoss(.01);game._updateBoss(bossVolley(i).windup);
+  for(const shot of game.projectiles)shot.age=shot.travel*.72+(shot.age<0?shot.age:0);
+  game.player.lane=-1;game.player.x=-.85;
+  const renderer=new Renderer(canvas);renderer.setQuality('high');renderer.camera=1;renderer.time=1;renderer.draw(game,0,0);
+  new ResizeObserver(()=>{renderer.resize();renderer.draw(game,0,0);}).observe(canvas);
+}
+</script></html>
